@@ -8,6 +8,8 @@ import sys
 import pickle
 import copy
 
+import math
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler,TensorDataset
@@ -91,7 +93,7 @@ def main():
                         type=str,
                         help="The input data dir. Should contain the .tsv files (or other data files) for the task.")
     parser.add_argument("--model_dir",
-                        default='models/TinyBERT_4L_312D',
+                        default='models',
                         type=str,
                         help="The model dir.")
     parser.add_argument("--teacher_model",
@@ -170,7 +172,7 @@ def main():
     task_name = args.task_name.lower()
     data_dir = os.path.join(args.data_dir,task_name.upper())
     output_dir = os.path.join(args.output_dir,task_name)
-    processed_data_dir = os.path.join(args.data_dir,'preprocessed')
+    processed_data_dir = os.path.join(data_dir,'preprocessed')
     if not os.path.exists(processed_data_dir):
         os.mkdir(processed_data_dir)
     
@@ -245,7 +247,7 @@ def main():
     num_labels = len(label_list)
 
     tokenizer = BertTokenizer.from_pretrained(args.student_model, do_lower_case=True)
-  
+
     if args.aug_train:
         try:
             train_file = os.path.join(processed_data_dir,'aug_data')
@@ -265,7 +267,8 @@ def main():
             with open(train_file, 'wb') as f:
                 pickle.dump(train_features, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    num_train_optimization_steps = int(len(train_features) / args.batch_size) * args.num_train_epochs
+    num_train_optimization_steps = math.ceil(len(train_features) / args.batch_size) * args.num_train_epochs
+    
     train_data, _ = get_tensor_data(output_mode, train_features)
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.batch_size)
@@ -302,9 +305,9 @@ def main():
         mm_eval_dataloader = DataLoader(mm_eval_data, sampler=mm_eval_sampler,
                                         batch_size=args.batch_size)
 
-
-    teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model)
     
+    teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model)
+    import pdb; pdb.set_trace()
     teacher_model.to(device)
     teacher_model.eval()
     if n_gpu > 1:
@@ -334,6 +337,7 @@ def main():
                                                 input_bits = args.input_bits,
                                                 clip_val = args.clip_val)
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
+    
     student_model.to(device)
 
     logger.info("***** Running training *****")

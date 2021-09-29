@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_NAME = "config.json"
 WEIGHTS_NAME = "pytorch_model.bin"
+#WEIGHTS_NAME = "CoLA.bin"
 
 def gelu(x):
     """Implementation of the gelu activation function.
@@ -48,7 +49,7 @@ class BertEmbeddings(nn.Module):
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-
+        
     def forward(self, input_ids, token_type_ids):
         seq_length = input_ids.size(1)
         position_ids = torch.arange(
@@ -231,6 +232,7 @@ class BertPreTrainedModel(nn.Module):
             module.bias.data.zero_()
 
     @classmethod
+    # MSKIM
     def from_pretrained(cls, pretrained_model_name_or_path, *inputs, **kwargs):
         """
         Instantiate a BertPreTrainedModel from a pre-trained model file or a pytorch state dict.
@@ -301,7 +303,9 @@ class BertPreTrainedModel(nn.Module):
             start_prefix = 'bert.'
 
         logger.info('loading model...')
+        import pdb; pdb.set_trace()
         load(model, prefix=start_prefix)
+
         logger.info('done!')
         if len(missing_keys) > 0:
             logger.info("Weights of {} not initialized from pretrained model: {}".format(
@@ -346,10 +350,16 @@ class BertModel(BertPreTrainedModel):
 class BertForSequenceClassification(BertPreTrainedModel):
     def __init__(self, config, num_labels = 2):
         super(BertForSequenceClassification, self).__init__(config)
-        self.num_labels = num_labels
+        
+        # MSKIM made exception for MNLI Classifier
+        if 'num_labels' in config.to_dict():
+            self.num_labels = config.num_labels
+        else:
+            self.num_labels = num_labels
+
         self.bert = BertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.classifier = nn.Linear(config.hidden_size, num_labels)
+        self.classifier = nn.Linear(config.hidden_size, self.num_labels)
         self.apply(self.init_bert_weights)
 
     def forward(self, input_ids, 
