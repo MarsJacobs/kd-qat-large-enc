@@ -307,7 +307,7 @@ def main():
 
     
     teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model)
-    import pdb; pdb.set_trace()
+    
     teacher_model.to(device)
     teacher_model.eval()
     if n_gpu > 1:
@@ -331,11 +331,14 @@ def main():
                             device, output_mode, mm_eval_labels, num_labels)
         fp32_performance += f"  mm-acc:{result['acc']}"
     fp32_performance = task_name +' fp32   ' + fp32_performance
+    
     student_config = BertConfig.from_pretrained(args.teacher_model, 
                                                 quantize_act=True,
                                                 weight_bits = args.weight_bits,
                                                 input_bits = args.input_bits,
                                                 clip_val = args.clip_val)
+
+    
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
     student_model.to(device)

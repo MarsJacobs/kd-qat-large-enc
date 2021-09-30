@@ -15,7 +15,7 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.
+# limitations under the License.w
 """PyTorch BERT model."""
 
 from __future__ import absolute_import, division, print_function, unicode_literals
@@ -33,7 +33,8 @@ from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer
 logger = logging.getLogger(__name__)
 
 CONFIG_NAME = "config.json"
-WEIGHTS_NAME = "pytorch_model.bin"
+WEIGHTS_NAME = "SST_renamed.bin"
+#WEIGHTS_NAME = "pytorch_model.bin"
 
 def gelu(x):
     """Implementation of the gelu activation function.
@@ -327,6 +328,7 @@ class BertPreTrainedModel(nn.Module):
             start_prefix = 'bert.'
 
         logger.info('loading model...')
+        import pdb; pdb.set_trace()
         load(model, prefix=start_prefix)
         logger.info('done!')
         if len(missing_keys) > 0:
