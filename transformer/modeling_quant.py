@@ -32,9 +32,9 @@ from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer
 
 logger = logging.getLogger(__name__)
 
-CONFIG_NAME = "config.json"
-WEIGHTS_NAME = "SST_renamed.bin"
-#WEIGHTS_NAME = "pytorch_model.bin"
+CONFIG_NAME = "config_bert_base.json"
+#WEIGHTS_NAME = "SST_renamed.bin"
+WEIGHTS_NAME = "pytorch_model.bin"
 
 def gelu(x):
     """Implementation of the gelu activation function.
@@ -271,10 +271,12 @@ class BertPreTrainedModel(nn.Module):
             *inputs, **kwargs: additional input for the specific Bert class
                 (ex: num_labels for BertForSequenceClassification)
         """
+        
         state_dict = kwargs.get('state_dict', None)
         kwargs.pop('state_dict', None)
         config = kwargs.get('config', None)
         kwargs.pop('config', None)
+        
         if config is None:
             # Load config
             config_file = os.path.join(pretrained_model_name_or_path, CONFIG_NAME)
@@ -328,7 +330,7 @@ class BertPreTrainedModel(nn.Module):
             start_prefix = 'bert.'
 
         logger.info('loading model...')
-        import pdb; pdb.set_trace()
+        
         load(model, prefix=start_prefix)
         logger.info('done!')
         if len(missing_keys) > 0:
