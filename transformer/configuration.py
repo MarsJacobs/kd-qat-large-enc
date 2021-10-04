@@ -11,7 +11,8 @@ from io import open
 
 logger = logging.getLogger(__name__)
 
-CONFIG_NAME = "config_bert_base.json"
+#CONFIG_NAME = "config_bert_base.json"
+CONFIG_NAME = "config.json"
 class BertConfig(object):
     r"""
         :class:`~transformers.BertConfig` is the configuration class to store the configuration of a

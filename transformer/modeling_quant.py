@@ -32,8 +32,9 @@ from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer
 
 logger = logging.getLogger(__name__)
 
-CONFIG_NAME = "config_bert_base.json"
+#CONFIG_NAME = "config_bert_base.json"
 #WEIGHTS_NAME = "SST_renamed.bin"
+CONFIG_NAME = "config.json"
 WEIGHTS_NAME = "pytorch_model.bin"
 
 def gelu(x):

@@ -180,9 +180,9 @@ def main():
         os.mkdir(output_dir)
     
     if args.student_model is None:
-        args.student_model = os.path.join(args.model_dir,task_name.upper())
+        args.student_model = os.path.join("output", "BERT_base",task_name.upper())
     if args.teacher_model is None:
-        args.teacher_model = os.path.join(args.model_dir,task_name.upper())
+        args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
 
     processors = {
         "cola": ColaProcessor,
@@ -315,6 +315,7 @@ def main():
     
     result = do_eval(teacher_model, task_name, eval_dataloader,
                     device, output_mode, eval_labels, num_labels)
+    
     if task_name in acc_tasks:
         if task_name in ['sst-2','mnli','qnli','rte']:
             fp32_performance = f"acc:{result['acc']}"
@@ -430,6 +431,7 @@ def main():
             
             if global_step % args.eval_step == 0 or global_step == num_train_optimization_steps-1:
                 logger.info("***** Running evaluation *****")
+                
                 logger.info("  {} step of {} steps".format(global_step, num_train_optimization_steps))
                 if previous_best is not None:
                     logger.info(f"{fp32_performance}\nPrevious best = {previous_best}")
@@ -455,14 +457,18 @@ def main():
 
                 if task_name=='cola':
                     summaryWriter.add_scalar('mcc',result['mcc'],global_step)
+                    logger.info(f"Eval Result is {result['mcc']}")
                 elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
                     summaryWriter.add_scalar('acc',result['acc'],global_step)
+                    logger.info(f"Eval Result is {result['acc']}")
                 elif task_name in ['mrpc','qqp']:
                     summaryWriter.add_scalars('performance',{'acc':result['acc'],
                                                 'f1':result['f1'],
                                                 'acc_and_f1':result['acc_and_f1']},global_step)
+                    logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
                 else:
                     summaryWriter.add_scalar('corr',result['corr'],global_step)
+                    logger.info(f"Eval Result is {result['corr']}")
 
                 save_model = False
 

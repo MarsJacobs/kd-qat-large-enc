@@ -29,7 +29,8 @@ from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer
 
 logger = logging.getLogger(__name__)
 
-CONFIG_NAME = "config_bert_base.json"
+#CONFIG_NAME = "config_bert_base.json"
+CONFIG_NAME = "config.json"
 WEIGHTS_NAME = "pytorch_model.bin"
 #WEIGHTS_NAME = "SST_renamed.bin"
 
