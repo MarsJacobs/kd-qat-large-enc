@@ -434,7 +434,7 @@ def main():
                 
                 logger.info("  {} step of {} steps".format(global_step, num_train_optimization_steps))
                 if previous_best is not None:
-                    logger.info(f"{fp32_performance}revious best = {previous_best}")
+                    logger.info(f"{fp32_performance}\nPrevious best = {previous_best}")
 
                 student_model.eval()
 
