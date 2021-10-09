@@ -2,3 +2,4 @@ data
 models
 output
 __pycache__
+.neptune
