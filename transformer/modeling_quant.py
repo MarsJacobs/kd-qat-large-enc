@@ -89,7 +89,11 @@ class BertSelfAttention(nn.Module):
         self.all_head_size = self.num_attention_heads * self.attention_head_size
         self.quantize_act = config.quantize_act
 
-        if config.quantize and config.qkv_q:
+        is_q_layer = True
+        if config.layer_num != -1:
+            is_q_layer = config.layer_num == i
+
+        if config.quantize and config.qkv_q and is_q_layer:
             self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
             self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
             self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
