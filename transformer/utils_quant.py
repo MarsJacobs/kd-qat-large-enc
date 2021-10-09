@@ -175,7 +175,8 @@ class QuantizeLinear(nn.Linear):
         # quantize weight
         weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)
         # quantize input
-        input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
+        if self.quantize_act:
+            input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
         out = nn.functional.linear(input, weight)
         if not self.bias is None:
             out += self.bias.view(1, -1).expand_as(out)

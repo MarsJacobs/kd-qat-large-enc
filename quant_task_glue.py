@@ -23,10 +23,23 @@ from transformer import BertAdam
 from transformer import BertConfig
 from utils_glue import *
 
+import matplotlib.pyplot as plt
+
 log_format = '%(asctime)s %(message)s'
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format=log_format, datefmt='%m/%d %I:%M:%S %p')
 logger = logging.getLogger()
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 
 def get_tensor_data(output_mode, features):
     if output_mode == "classification":
@@ -50,6 +63,7 @@ def do_eval(model, task_name, eval_dataloader,
 
     for _,batch_ in enumerate(eval_dataloader):
         batch_ = tuple(t.to(device) for t in batch_)
+        
         with torch.no_grad():
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch_
             logits, _, _ = model(input_ids, segment_ids, input_mask)
@@ -129,6 +143,12 @@ def main():
     parser.add_argument('--aug_train',
                         action='store_false',
                         help="Whether to use augmented data or not")
+
+    # MSKIM Add GT Loss Option
+    parser.add_argument('--gt_loss',
+                        action='store_true',
+                        help="Whether to use GT Label Loss")
+
     parser.add_argument('--pred_distill',
                         action='store_true',
                         help="Whether to distil with task layer")
@@ -160,9 +180,48 @@ def main():
                         type=float,
                         help="Initial clip value.")
 
+    parser.add_argument('--act_quant',
+                        default=True, type=str2bool,
+                        help="Whether to quantize activation")
+    
+    parser.add_argument('--neptune',
+                        action='store_true',
+                        help="neptune logging option")
+    
+    #MSKIM Quantization Range Option
+    parser.add_argument('--quantize',
+                        default =False, type=str2bool,
+                        help="Whether to quantize student model")
+
+    parser.add_argument('--ffn',
+                        default =False, type=str2bool,
+                        help="Whether to quantize Feed Forward Network")
+    
+    parser.add_argument('--qkv',
+                        default =False, type=str2bool,
+                        help="Whether to quantize Query, Key, Value Mapping Weight Matrix")
+    
+    parser.add_argument('--emb',
+                        default =False, type=str2bool,
+                        help="Whether to quantize Embedding Layer")
+
+    parser.add_argument('--cls',
+                        default =False, type=str2bool,
+                        help="Whether to quantize Classifier Dense Layer")
+
+    parser.add_argument("--layer_num",
+                        default=-1,
+                        type=int,
+                        help="Number of layer to quantize (-1 : Quantize every layer")
+    
     args = parser.parse_args()
     assert args.pred_distill or args.intermediate_distill, "'pred_distill' and 'intermediate_distill', at least one must be True"
     
+    if args.neptune:
+        import neptune.new as neptune
+        run = neptune.init(project='niceball0827/' + 'Ternary',
+                    api_token='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI0YjM0ZTYwMi1kNjQwLTQ4NGYtOTYxMy03Mjc5ZmVkMzY2YTgifQ==')
+
     tb_dir = os.path.join(args.output_dir, "Tensorboard", args.task_name)
     if not os.path.exists(tb_dir):
         os.mkdir(tb_dir)
@@ -181,8 +240,10 @@ def main():
     
     if args.student_model is None:
         args.student_model = os.path.join("output", "BERT_base",task_name.upper())
+        #args.student_model = os.path.join(args.model_dir, task_name.upper())
     if args.teacher_model is None:
         args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
+        #args.teacher_model = os.path.join(args.model_dir, task_name.upper())
 
     processors = {
         "cola": ColaProcessor,
@@ -208,7 +269,7 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step":50},
+        "cola": {"max_seq_length": 64,"batch_size":32,"eval_step":50},
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":200},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":200},
@@ -316,7 +377,7 @@ def main():
     result = do_eval(teacher_model, task_name, eval_dataloader,
                     device, output_mode, eval_labels, num_labels)
     print(result)
-
+    
     if task_name in acc_tasks:
         if task_name in ['sst-2','mnli','qnli','rte']:
             fp32_performance = f"acc:{result['acc']}"
@@ -335,16 +396,21 @@ def main():
     fp32_performance = task_name +' fp32   ' + fp32_performance
     
     student_config = BertConfig.from_pretrained(args.teacher_model, 
-                                                quantize_act=True,
+                                                quantize_act=args.act_quant,
                                                 weight_bits = args.weight_bits,
                                                 input_bits = args.input_bits,
-                                                clip_val = args.clip_val)
+                                                clip_val = args.clip_val,
+                                                quantize = args.quantize,
+                                                ffn_q = args.ffn,
+                                                qkv_q = args.qkv,
+                                                emb_q = args.emb,
+                                                cls_q = args.cls,
+                                                layer_num = args.layer_num)
 
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
     student_model.to(device)
-
     logger.info("***** Running training *****")
     logger.info("  Num examples = %d", len(train_features))
     logger.info("  Batch size = %d", args.batch_size)
@@ -374,6 +440,8 @@ def main():
     tr_att_loss = 0.
     tr_rep_loss = 0.
     tr_cls_loss = 0.
+
+    # log_period = num_train_optimization_steps / 
     for epoch_ in range(int(args.num_train_epochs)):
         logger.info("****************************** %d Epoch ******************************", epoch_)
         nb_tr_examples, nb_tr_steps = 0, 0
@@ -391,6 +459,10 @@ def main():
 
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps = teacher_model(input_ids, segment_ids, input_mask)
+            
+            if args.gt_loss:
+                lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
+                loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
             
             if args.pred_distill:
                 if output_mode == "classification":
@@ -451,6 +523,8 @@ def main():
                 result['att_loss'] = att_loss
                 result['rep_loss'] = rep_loss
                 result['loss'] = loss
+                
+                summaryWriter.add_scalar('lr', optimizer.get_lr()[0], global_step)
                 summaryWriter.add_scalar('total_loss',loss,global_step)
                 summaryWriter.add_scalars('distill_loss',{'att_loss':att_loss,
                                             'rep_loss':rep_loss,

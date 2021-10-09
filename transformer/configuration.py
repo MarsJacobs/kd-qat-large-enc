@@ -95,6 +95,7 @@ class BertConfig(object):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
+        
         config_file = os.path.join(pretrained_model_name_or_path, CONFIG_NAME)
         logger.info("loading configuration file {}".format(config_file))
         # Load config

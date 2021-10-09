@@ -488,7 +488,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
     for (ex_index, example) in enumerate(examples):
         if ex_index % 10000 == 0:
             logger.info("Writing example %d of %d" % (ex_index, len(examples)))
-
+        import pdb; pdb.set_trace()
         tokens_a = tokenizer.tokenize(example.text_a)
 
         tokens_b = None

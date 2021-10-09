@@ -53,6 +53,7 @@ class BertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         
     def forward(self, input_ids, token_type_ids):
+        
         seq_length = input_ids.size(1)
         position_ids = torch.arange(
             seq_length, dtype=torch.long, device=input_ids.device)
@@ -61,7 +62,7 @@ class BertEmbeddings(nn.Module):
         words_embeddings = self.word_embeddings(input_ids)
         position_embeddings = self.position_embeddings(position_ids)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-
+        
         embeddings = words_embeddings + position_embeddings + token_type_embeddings
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
@@ -186,6 +187,7 @@ class BertEncoder(nn.Module):
                                     for _ in range(config.num_hidden_layers)])
 
     def forward(self, hidden_states, attention_mask):
+        
         all_encoder_layers = [hidden_states]
         all_encoder_atts = []
         for _, layer_module in enumerate(self.layer):

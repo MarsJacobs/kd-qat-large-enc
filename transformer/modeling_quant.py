@@ -48,7 +48,12 @@ def gelu(x):
 class BertEmbeddings(nn.Module):
     def __init__(self, config):
         super(BertEmbeddings, self).__init__()
-        self.word_embeddings = QuantizeEmbedding(config.vocab_size, config.hidden_size, padding_idx = 0,config=config)
+
+        if config.quantize and config.emb_q:
+            self.word_embeddings = QuantizeEmbedding(config.vocab_size, config.hidden_size, padding_idx = 0,config=config)
+        else:
+            self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
+        
         # position_embeddings and token_type_embeddings are kept in fp32 anyway
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
@@ -72,7 +77,7 @@ class BertEmbeddings(nn.Module):
 
 
 class BertSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertSelfAttention, self).__init__()
         if config.hidden_size % config.num_attention_heads != 0:
             raise ValueError(
@@ -83,9 +88,15 @@ class BertSelfAttention(nn.Module):
             config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
         self.quantize_act = config.quantize_act
-        self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
-        self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
-        self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+
+        if config.quantize and config.qkv_q:
+            self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+            self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+            self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+        else:
+            self.query = nn.Linear(config.hidden_size, self.all_head_size)
+            self.key = nn.Linear(config.hidden_size, self.all_head_size)
+            self.value = nn.Linear(config.hidden_size, self.all_head_size)
 
         # do quantization for k,q,v and attention scores
         if self.quantize_act:
@@ -136,10 +147,10 @@ class BertSelfAttention(nn.Module):
 
 
 class BertAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertAttention, self).__init__()
-        self.self = BertSelfAttention(config)
-        self.output = BertSelfOutput(config)
+        self.self = BertSelfAttention(config, i)
+        self.output = BertSelfOutput(config, i)
 
     def forward(self, input_tensor, attention_mask):
         self_output, layer_att = self.self(input_tensor, attention_mask)
@@ -148,9 +159,18 @@ class BertAttention(nn.Module):
 
 
 class BertSelfOutput(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertSelfOutput, self).__init__()
-        self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
+
+        is_q_layer = True
+        if config.layer_num != -1:
+            is_q_layer = config.layer_num == i
+
+        if config.quantize and config.qkv_q and is_q_layer:
+            self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -162,9 +182,18 @@ class BertSelfOutput(nn.Module):
 
 
 class BertIntermediate(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertIntermediate, self).__init__()
-        self.dense = QuantizeLinear(config.hidden_size, config.intermediate_size,config=config)
+        
+        is_q_layer = True
+        if config.layer_num != -1:
+            is_q_layer = config.layer_num == i
+
+        if config.quantize and config.ffn_q and is_q_layer:
+            self.dense = QuantizeLinear(config.hidden_size, config.intermediate_size,config=config)
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+
     def forward(self, hidden_states):
         hidden_states = self.dense(hidden_states)
         hidden_states = gelu(hidden_states)
@@ -172,9 +201,18 @@ class BertIntermediate(nn.Module):
 
 
 class BertOutput(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertOutput, self).__init__()
-        self.dense = QuantizeLinear(config.intermediate_size, config.hidden_size,config=config)
+
+        is_q_layer = True
+        if config.layer_num != -1:
+            is_q_layer = config.layer_num == i
+
+        if config.quantize and config.ffn_q and is_q_layer:
+            self.dense = QuantizeLinear(config.intermediate_size, config.hidden_size,config=config)
+        else:
+            self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -186,11 +224,11 @@ class BertOutput(nn.Module):
 
 
 class BertLayer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertLayer, self).__init__()
-        self.attention = BertAttention(config)
-        self.intermediate = BertIntermediate(config)
-        self.output = BertOutput(config)
+        self.attention = BertAttention(config, i)
+        self.intermediate = BertIntermediate(config, i)
+        self.output = BertOutput(config, i)
 
     def forward(self, hidden_states, attention_mask):
 
@@ -205,8 +243,8 @@ class BertLayer(nn.Module):
 class BertEncoder(nn.Module):
     def __init__(self, config):
         super(BertEncoder, self).__init__()
-        self.layer = nn.ModuleList([BertLayer(config)
-                                    for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList([BertLayer(config, i)
+                                    for i in range(config.num_hidden_layers)])
 
     def forward(self, hidden_states, attention_mask):
         all_encoder_layers = [hidden_states]
@@ -223,7 +261,12 @@ class BertEncoder(nn.Module):
 class BertPooler(nn.Module):
     def __init__(self, config, recurs=None):
         super(BertPooler, self).__init__()
-        self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
+        
+        if config.quantize and config.cls_q:
+            self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
+        else:
+            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+
         self.activation = nn.Tanh()
         self.config = config
 
@@ -285,7 +328,6 @@ class BertPreTrainedModel(nn.Module):
 
         logger.info("Model config {}".format(config))
         # Instantiate model.
-
         model = cls(config, *inputs, **kwargs)
         if state_dict is None:
             weights_path = os.path.join(
