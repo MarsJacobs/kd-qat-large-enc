@@ -193,7 +193,11 @@ def main():
                         default =False, type=str2bool,
                         help="Whether to quantize student model")
 
-    parser.add_argument('--ffn',
+    parser.add_argument('--ffn_1',
+                        default =False, type=str2bool,
+                        help="Whether to quantize Feed Forward Network")
+    
+    parser.add_argument('--ffn_2',
                         default =False, type=str2bool,
                         help="Whether to quantize Feed Forward Network")
     
@@ -214,18 +218,29 @@ def main():
                         type=int,
                         help="Number of layer to quantize (-1 : Quantize every layer")
     
-    args = parser.parse_args()
-    assert args.pred_distill or args.intermediate_distill, "'pred_distill' and 'intermediate_distill', at least one must be True"
+    parser.add_argument("--kd_layer_num",
+                        default=-1,
+                        type=int,
+                        help="Number of layer to Apply KD (-1 : Distill every layer")
     
+    parser.add_argument("--mean_scale",
+                        default=1.0,
+                        type=float,
+                        help="Ternary Clipping Value Scale Value")
+
+    args = parser.parse_args() 
+    #assert args.pred_distill or args.intermediate_distill, "'pred_distill' and 'intermediate_distill', at least one must be True"
+    
+    run = None
     if args.neptune:
         import neptune.new as neptune
-        run = neptune.init(project='niceball0827/' + 'Ternary',
+        run = neptune.init(project='niceball0827/' + args.task_name.upper(),
                     api_token='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI0YjM0ZTYwMi1kNjQwLTQ4NGYtOTYxMy03Mjc5ZmVkMzY2YTgifQ==')
 
     tb_dir = os.path.join(args.output_dir, "Tensorboard", args.task_name)
     if not os.path.exists(tb_dir):
         os.mkdir(tb_dir)
-    summaryWriter = SummaryWriter(tb_dir)
+    #summaryWriter = SummaryWriter(tb_dir)
 
     logger.info('The args: {}'.format(args))
     task_name = args.task_name.lower()
@@ -269,9 +284,9 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":32,"eval_step":50},
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step":50},
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
-        "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":200},
+        "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":200},
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":50},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
@@ -311,16 +326,19 @@ def main():
 
     if args.aug_train:
         try:
-            train_file = os.path.join(processed_data_dir,'aug_data')
+            train_file = os.path.join(processed_data_dir,'aug_data.pkl')
             train_features = pickle.load(open(train_file,'rb'))
         except:
             train_examples = processor.get_aug_examples(data_dir)
             train_features = convert_examples_to_features(train_examples, label_list,
                                             args.max_seq_length, tokenizer, output_mode)
+            with open(train_file, 'wb') as f:
+                pickle.dump(train_features, f, protocol=pickle.HIGHEST_PROTOCOL)
     else:
         try:
             train_file = os.path.join(processed_data_dir,'data.pkl')
             train_features = pickle.load(open(train_file,'rb'))
+            
         except:
             train_examples = processor.get_train_examples(data_dir)
             train_features = convert_examples_to_features(train_examples, label_list,
@@ -401,12 +419,13 @@ def main():
                                                 input_bits = args.input_bits,
                                                 clip_val = args.clip_val,
                                                 quantize = args.quantize,
-                                                ffn_q = args.ffn,
+                                                ffn_q_1 = args.ffn_1,
+                                                ffn_q_2 = args.ffn_2,
                                                 qkv_q = args.qkv,
                                                 emb_q = args.emb,
                                                 cls_q = args.cls,
-                                                layer_num = args.layer_num)
-
+                                                layer_num = args.layer_num,
+                                                mean_scale = args.mean_scale)
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
@@ -474,18 +493,36 @@ def main():
                 tr_cls_loss += cls_loss.item()
 
             if args.intermediate_distill:
-                for student_att, teacher_att in zip(student_atts, teacher_atts):
+                for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):
                     student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to(device),
                                                 student_att)
                     teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to(device),
                                                 teacher_att)
-                    tmp_loss = loss_mse(student_att, teacher_att)
+                    
+                    if args.kd_layer_num != -1:
+                        if i == args.kd_layer_num:
+                            tmp_loss = loss_mse(student_att, teacher_att)
+                        else:
+                            tmp_loss = loss_mse(student_att, teacher_att)
+                            tmp_loss = tmp_loss * 0
+                    else:
+                        tmp_loss = loss_mse(student_att, teacher_att)
+
                     att_loss += tmp_loss
 
-                for student_rep, teacher_rep in zip(student_reps, teacher_reps):
-                    tmp_loss = loss_mse(student_rep, teacher_rep)
-                    rep_loss += tmp_loss
+                for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
+                    
+                    if args.kd_layer_num != -1:
+                        if i == args.kd_layer_num:
+                            tmp_loss = loss_mse(student_att, teacher_att)
+                        else:
+                            tmp_loss = loss_mse(student_att, teacher_att)
+                            tmp_loss = tmp_loss * 0
+                    else:
+                        tmp_loss = loss_mse(student_rep, teacher_rep)
 
+                    rep_loss += tmp_loss
+                
                 loss += rep_loss + att_loss
                 tr_att_loss += att_loss.item()
                 tr_rep_loss += rep_loss.item()
@@ -515,7 +552,8 @@ def main():
                 cls_loss = tr_cls_loss / (step + 1)
                 att_loss = tr_att_loss / (step + 1)
                 rep_loss = tr_rep_loss / (step + 1)
-
+                
+                # Logging
                 result = do_eval(student_model, task_name, eval_dataloader,
                                     device, output_mode, eval_labels, num_labels)
                 result['global_step'] = global_step
@@ -524,27 +562,47 @@ def main():
                 result['rep_loss'] = rep_loss
                 result['loss'] = loss
                 
-                summaryWriter.add_scalar('lr', optimizer.get_lr()[0], global_step)
-                summaryWriter.add_scalar('total_loss',loss,global_step)
-                summaryWriter.add_scalars('distill_loss',{'att_loss':att_loss,
-                                            'rep_loss':rep_loss,
-                                            'cls_loss':cls_loss},global_step)
+                # for module in student_model.named_modules():
+                #     if module[1].__class__.__name__ == "QuantizeLinear":
+                #         import pdb; pdb.set_trace()
+
+
+                # summaryWriter.add_scalar('lr', optimizer.get_lr()[0], global_step)
+                # summaryWriter.add_scalar('total_loss',loss,global_step)
+                # summaryWriter.add_scalars('distill_loss',{'att_loss':att_loss,
+                #                             'rep_loss':rep_loss,
+                #                             'cls_loss':cls_loss},global_step)
+                if run is not None:
+                    run["metrics/lr"].log(optimizer.get_lr()[0])
+                    run["loss/total_loss"].log(tr_loss)
+                    run["loss/att_loss_loss"].log(tr_att_loss)
+                    run["loss/rep_loss_loss"].log(tr_rep_loss)
+                    run["loss/cls_loss_loss"].log(tr_cls_loss)
 
                 if task_name=='cola':
-                    summaryWriter.add_scalar('mcc',result['mcc'],global_step)
+                    #summaryWriter.add_scalar('mcc',result['mcc'],global_step)
+                    if run is not None:
+                        run["metrics/mcc"].log(result['mcc'])
                     logger.info(f"Eval Result is {result['mcc']}")
                 elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
-                    summaryWriter.add_scalar('acc',result['acc'],global_step)
+                    #summaryWriter.add_scalar('acc',result['acc'],global_step)
+                    if run is not None:
+                        run["metrics/acc"].log(result['acc'])
                     logger.info(f"Eval Result is {result['acc']}")
                 elif task_name in ['mrpc','qqp']:
-                    summaryWriter.add_scalars('performance',{'acc':result['acc'],
-                                                'f1':result['f1'],
-                                                'acc_and_f1':result['acc_and_f1']},global_step)
+                    # summaryWriter.add_scalars('performance',{'acc':result['acc'],
+                    #                             'f1':result['f1'],
+                    #                             'acc_and_f1':result['acc_and_f1']},global_step)
+                    if run is not None:
+                        run["metrics/acc_and_f1"].log(result['acc_and_f1'])
                     logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
                 else:
-                    summaryWriter.add_scalar('corr',result['corr'],global_step)
+                    #summaryWriter.add_scalar('corr',result['corr'],global_step)
+                    if run is not None:
+                        run["metrics/corr"].log(result['corr'])
                     logger.info(f"Eval Result is {result['corr']}")
 
+                # Save Model
                 save_model = False
 
                 if task_name in acc_tasks and result['acc'] > best_dev_acc:
@@ -587,12 +645,16 @@ def main():
                         output_quant_dir = os.path.join(output_dir, 'quant')
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)
+                        output_quant_dir = os.path.join(output_quant_dir, str(student_config.mean_scale))
+                        if not os.path.exists(output_quant_dir):
+                            os.makedirs(output_quant_dir)
+                        
                         model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
                         quant_model = copy.deepcopy(model_to_save)
                         for name, module in quant_model.named_modules():
                             if hasattr(module,'weight_quantizer'):
-                                module.weight.data = module.weight_quantizer.apply(module.weight,module.weight_clip_val,
-                                                                             module.weight_bits,True)
+                                module.qweight = module.weight_quantizer.apply(module.weight,module.weight_clip_val,
+                                                                             module.weight_bits,True, student_config.mean_scale)
                                 
                         output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
                         output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)

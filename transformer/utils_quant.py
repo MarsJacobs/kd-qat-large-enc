@@ -111,9 +111,8 @@ class TwnQuantizer(torch.autograd.Function):
     """Ternary Weight Networks (TWN)
     Ref: https://arxiv.org/abs/1605.04711
     """
-
     @staticmethod
-    def forward(ctx, input, clip_val, num_bits, layerwise):
+    def forward(ctx, input, clip_val, num_bits, layerwise, mean_scale):
         """
         :param input: tensor to be ternarized
         :return: quantized tensor
@@ -123,7 +122,7 @@ class TwnQuantizer(torch.autograd.Function):
         input = torch.where(input > clip_val[0], input, clip_val[0])
         if layerwise:
             m = input.norm(p=1).div(input.nelement())
-            thres = 0.7 * m
+            thres = mean_scale * m  
             pos = (input > thres).float()
             neg = (input < -thres).float()
             mask = (input.abs() > thres).float()
@@ -132,13 +131,13 @@ class TwnQuantizer(torch.autograd.Function):
         else: # row-wise only for embed / weight
             n = input[0].nelement()
             m = input.data.norm(p=1, dim=1).div(n)
-            thres = (0.7 * m).view(-1, 1).expand_as(input)
+            thres = (mean_scale * m).view(-1, 1).expand_as(input)
             pos = (input > thres).float()
             neg = (input < -thres).float()
             mask = (input.abs() > thres).float()
             alpha = ((mask * input).abs().sum(dim=1) / mask.sum(dim=1)).view(-1, 1)
             result = alpha * pos - alpha * neg
-
+        
         return result
 
     @staticmethod
@@ -152,7 +151,7 @@ class TwnQuantizer(torch.autograd.Function):
         grad_input = grad_output.clone()
         grad_input[input.ge(clip_val[1])] = 0
         grad_input[input.le(clip_val[0])] = 0
-        return grad_input, None, None, None
+        return grad_input, None, None, None, None
 
 class QuantizeLinear(nn.Linear):
 
@@ -161,6 +160,9 @@ class QuantizeLinear(nn.Linear):
         self.quantize_act = config.quantize_act
         self.weight_bits = config.weight_bits
         self.quantize_act = config.quantize_act
+        self.mean_scale = config.mean_scale
+        self.qweight = None
+
         if self.weight_bits == 2:
             self.weight_quantizer = TwnQuantizer
         else:
@@ -173,8 +175,10 @@ class QuantizeLinear(nn.Linear):
 
     def forward(self, input):
         # quantize weight
-        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)
+        
+        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True, self.mean_scale)
         # quantize input
+        
         if self.quantize_act:
             input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
         out = nn.functional.linear(input, weight)
@@ -183,6 +187,21 @@ class QuantizeLinear(nn.Linear):
 
         return out
 
+    # MSKIM get Ternary Weight Quantization's Threshold and Alpha Value
+    def get_thres_alpha(self):
+
+        weight = self.weight.clone().detach()
+        new_weight = torch.where(weight < self.weight_clip_val[1], weight, self.weight_clip_val[1])
+        new_weight = torch.where(weight > self.weight_clip_val[0], weight, self.weight_clip_val[0])
+        m = weight.norm(p=1).div(weight.nelement())
+        thres = 0.7 * m
+        mask = (weight.abs() > thres).float()
+        alpha = (mask * weight).abs().sum() / mask.sum()
+
+        return thres, alpha
+
+
+
 
 class QuantizeEmbedding(nn.Embedding):
 
@@ -190,6 +209,10 @@ class QuantizeEmbedding(nn.Embedding):
         super(QuantizeEmbedding, self).__init__(*kargs, padding_idx = padding_idx)
         self.weight_bits = config.weight_bits
         self.layerwise = False
+        self.qweight = None
+        self.mean_scale = config.mean_scale
+        
+
         if self.weight_bits == 2:
             self.weight_quantizer = TwnQuantizer
         else:
@@ -198,8 +221,23 @@ class QuantizeEmbedding(nn.Embedding):
         self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
 
     def forward(self, input):
-        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits,self.layerwise)
+        
+        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits,self.layerwise, self.mean_scale)
         out = nn.functional.embedding(
             input, weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
         return out
+
+    def get_thres_alpha(self):
+
+        weight = self.weight.clone().detach()
+        new_weight = torch.where(weight < self.weight_clip_val[1], weight, self.weight_clip_val[1])
+        new_weight = torch.where(weight > self.weight_clip_val[0], weight, self.weight_clip_val[0])
+
+        n = weight[0].nelement()
+        m = weight.norm(p=1, dim=1).div(n)
+        thres = (0.7 * m).view(-1,1).expand_as(weight)
+        mask = (weight.abs() > thres).float()
+        alpha = ((mask * weight).abs().sum(dim=1) / mask.sum(dim=1)).view(-1,1)
+
+        return thres, alpha

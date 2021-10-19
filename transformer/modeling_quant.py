@@ -61,6 +61,7 @@ class BertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids, token_type_ids):
+        #import pdb; pdb.set_trace()
         seq_length = input_ids.size(1)
         position_ids = torch.arange(
             seq_length, dtype=torch.long, device=input_ids.device)
@@ -123,6 +124,10 @@ class BertSelfAttention(nn.Module):
         mixed_query_layer = self.query(hidden_states)
         mixed_key_layer = self.key(hidden_states)
         mixed_value_layer = self.value(hidden_states)
+
+        # Batch Size : 32, Max_len_seq : 64
+        # Attantion Scores and Value shape : 32, 12, 64, 64
+        # After Concat Shape : 32, 64, 768
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
@@ -193,8 +198,9 @@ class BertIntermediate(nn.Module):
         if config.layer_num != -1:
             is_q_layer = config.layer_num == i
 
-        if config.quantize and config.ffn_q and is_q_layer:
+        if config.quantize and config.ffn_q_1 and is_q_layer:
             self.dense = QuantizeLinear(config.hidden_size, config.intermediate_size,config=config)
+            #self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
         else:
             self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
 
@@ -212,8 +218,9 @@ class BertOutput(nn.Module):
         if config.layer_num != -1:
             is_q_layer = config.layer_num == i
 
-        if config.quantize and config.ffn_q and is_q_layer:
+        if config.quantize and config.ffn_q_2 and is_q_layer:
             self.dense = QuantizeLinear(config.intermediate_size, config.hidden_size,config=config)
+            #self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
         else:
             self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
 
@@ -221,6 +228,7 @@ class BertOutput(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
+        #import pdb; pdb.set_trace()
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
