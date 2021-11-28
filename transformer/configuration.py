@@ -109,7 +109,7 @@ class BertConfig(object):
         for key in to_remove:
             kwargs.pop(key, None)
 
-        logger.info("Model config %s", str(config))
+        #logger.info("Model config %s", str(config))
         return config
 
     @classmethod

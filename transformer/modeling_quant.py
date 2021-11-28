@@ -28,7 +28,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from .configuration import BertConfig
-from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer
+from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer, ClipLinear, ClipEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 #WEIGHTS_NAME = "SST_renamed.bin"
 CONFIG_NAME = "config.json"
 WEIGHTS_NAME = "pytorch_model.bin"
+#WEIGHTS_NAME = "cola_dw.bin"
 
 def gelu(x):
     """Implementation of the gelu activation function.
@@ -51,6 +52,9 @@ class BertEmbeddings(nn.Module):
 
         if config.quantize and config.emb_q:
             self.word_embeddings = QuantizeEmbedding(config.vocab_size, config.hidden_size, padding_idx = 0,config=config)
+        elif config.clipping:
+            self.word_embeddings = ClipEmbedding(config.vocab_size, config.hidden_size)
+            #self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         else:
             self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         
@@ -61,7 +65,6 @@ class BertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids, token_type_ids):
-        #import pdb; pdb.set_trace()
         seq_length = input_ids.size(1)
         position_ids = torch.arange(
             seq_length, dtype=torch.long, device=input_ids.device)
@@ -89,6 +92,7 @@ class BertSelfAttention(nn.Module):
             config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
         self.quantize_act = config.quantize_act
+        self.i = i
 
         is_q_layer = True
         if config.layer_num != -1:
@@ -98,6 +102,10 @@ class BertSelfAttention(nn.Module):
             self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
             self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
             self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+        elif config.clipping:
+            self.query = ClipLinear(config.hidden_size, self.all_head_size)
+            self.key = ClipLinear(config.hidden_size, self.all_head_size)
+            self.value = ClipLinear(config.hidden_size, self.all_head_size)
         else:
             self.query = nn.Linear(config.hidden_size, self.all_head_size)
             self.key = nn.Linear(config.hidden_size, self.all_head_size)
@@ -125,9 +133,9 @@ class BertSelfAttention(nn.Module):
         mixed_key_layer = self.key(hidden_states)
         mixed_value_layer = self.value(hidden_states)
 
-        # Batch Size : 32, Max_len_seq : 64
-        # Attantion Scores and Value shape : 32, 12, 64, 64
-        # After Concat Shape : 32, 64, 768
+        # Batch Size : 16, Max_len_seq : 64
+        # q, k, v : 16, 64, 768
+        # transpose for scores : 16, 64, 768 -> 16, 64, 12, 64 -> 16, 12(head), 64, 64 
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
@@ -141,6 +149,31 @@ class BertSelfAttention(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_scores = attention_scores + attention_mask
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        
+        # if self.i == 5:
+        #     import matplotlib.pyplot as plt
+        #     import numpy
+        #     query = query_layer[4,2,:13,:13]
+        #     key = key_layer.transpose(-1,-2)[4,2,:13,:13]
+        #     score = torch.matmul(query, key)
+        #     import pdb; pdb.set_trace()
+        #     attention_weight = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        #     print(attention_weight[4][2][:13,12])
+        #     print(attention_scores[4][2][:13,12])
+        #     scores = attention_scores[4][2][:13,:13].clone().detach().cpu().numpy()
+        #     fig, ax = plt.subplots(1, 1, figsize=(8,8))
+        #     heatmap = ax.pcolor(scores, cmap=plt.cm.Blues)
+        #     ax.set_xticks(numpy.arange(scores.shape[1])+0.5, minor=False)
+        #     ax.set_yticks(numpy.arange(scores.shape[0])+0.5, minor=False)
+        #     ax.set_xlim(0, int(scores.shape[1]))
+        #     ax.set_ylim(0, int(scores.shape[0]))
+        #     ax.invert_yaxis()
+        #     ax.xaxis.tick_top(); plt.xticks(rotation=45)
+        #     plt.savefig("test.png")
+        #     import pdb; pdb.set_trace()
+        
+        #torch.save(attention_probs, f"Q_layer_{self.i}_attn_probs.pth")
+        
         attention_probs = self.dropout(attention_probs)
 
         # quantize both attention probs and value layer for dot product
@@ -177,6 +210,8 @@ class BertSelfOutput(nn.Module):
 
         if config.quantize and config.qkv_q and is_q_layer:
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
+        elif config.clipping:
+            self.dense = ClipLinear(config.hidden_size, config.hidden_size)
         else:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
 
@@ -193,19 +228,25 @@ class BertSelfOutput(nn.Module):
 class BertIntermediate(nn.Module):
     def __init__(self, config, i):
         super(BertIntermediate, self).__init__()
-        
+        self.i = i
         is_q_layer = True
         if config.layer_num != -1:
             is_q_layer = config.layer_num == i
 
         if config.quantize and config.ffn_q_1 and is_q_layer:
             self.dense = QuantizeLinear(config.hidden_size, config.intermediate_size,config=config)
-            #self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+
+        elif config.clipping:
+            self.dense = ClipLinear(config.hidden_size, config.intermediate_size)
+
         else:
             self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+            
 
     def forward(self, hidden_states):
+        #torch.save(hidden_states, f"Q_layer_{self.i}_ffn1_input.pt")
         hidden_states = self.dense(hidden_states)
+        #torch.save(hidden_states, f"Q_layer_{self.i}_ffn1_output.pt")
         hidden_states = gelu(hidden_states)
         return hidden_states
 
@@ -213,25 +254,33 @@ class BertIntermediate(nn.Module):
 class BertOutput(nn.Module):
     def __init__(self, config, i):
         super(BertOutput, self).__init__()
-
+        self.i = i
         is_q_layer = True
         if config.layer_num != -1:
             is_q_layer = config.layer_num == i
 
         if config.quantize and config.ffn_q_2 and is_q_layer:
             self.dense = QuantizeLinear(config.intermediate_size, config.hidden_size,config=config)
-            #self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+            
+        elif config.clipping:
+            self.dense = ClipLinear(config.intermediate_size, config.hidden_size)
+
         else:
             self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
+            
 
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
         #import pdb; pdb.set_trace()
+        #torch.save(hidden_states, f"Q_layer_{self.i}_ffn2_input.pt")
         hidden_states = self.dense(hidden_states)
+        #torch.save(hidden_states, f"Q_layer_{self.i}_ffn2_output.pt")
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        #torch.save(hidden_states, f"Q_layer_{self.i}_ffn2_Layernorm_output.pt")
+        
         return hidden_states
 
 
@@ -276,6 +325,8 @@ class BertPooler(nn.Module):
         
         if config.quantize and config.cls_q:
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
+        elif config.clipping:
+            self.dense = ClipLinear(config.hidden_size, config.hidden_size)
         else:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
 
@@ -338,7 +389,7 @@ class BertPreTrainedModel(nn.Module):
             config_file = os.path.join(pretrained_model_name_or_path, CONFIG_NAME)
             config = BertConfig.from_json_file(config_file)
 
-        logger.info("Model config {}".format(config))
+        #logger.info("Model config {}".format(config))
         # Instantiate model.
         model = cls(config, *inputs, **kwargs)
         if state_dict is None:

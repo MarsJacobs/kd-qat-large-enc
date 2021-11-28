@@ -112,11 +112,13 @@ class TwnQuantizer(torch.autograd.Function):
     Ref: https://arxiv.org/abs/1605.04711
     """
     @staticmethod
-    def forward(ctx, input, clip_val, num_bits, layerwise, mean_scale):
+    def forward(ctx, input, clip_val, num_bits, layerwise):
         """
         :param input: tensor to be ternarized
         :return: quantized tensor
         """
+        mean_scale = 0.7
+
         ctx.save_for_backward(input, clip_val)
         input = torch.where(input < clip_val[1], input, clip_val[1])
         input = torch.where(input > clip_val[0], input, clip_val[0])
@@ -151,7 +153,7 @@ class TwnQuantizer(torch.autograd.Function):
         grad_input = grad_output.clone()
         grad_input[input.ge(clip_val[1])] = 0
         grad_input[input.le(clip_val[0])] = 0
-        return grad_input, None, None, None, None
+        return grad_input, None, None, None
 
 class QuantizeLinear(nn.Linear):
 
@@ -175,8 +177,7 @@ class QuantizeLinear(nn.Linear):
 
     def forward(self, input):
         # quantize weight
-        
-        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True, self.mean_scale)
+        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)
         # quantize input
         
         if self.quantize_act:
@@ -222,7 +223,7 @@ class QuantizeEmbedding(nn.Embedding):
 
     def forward(self, input):
         
-        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits,self.layerwise, self.mean_scale)
+        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits,self.layerwise)
         out = nn.functional.embedding(
             input, weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
@@ -241,3 +242,55 @@ class QuantizeEmbedding(nn.Embedding):
         alpha = ((mask * weight).abs().sum(dim=1) / mask.sum(dim=1)).view(-1,1)
 
         return thres, alpha
+
+class ClipLinear(nn.Linear):
+
+    def __init__(self,  *kargs,bias=True, config = None):
+        super(ClipLinear, self).__init__(*kargs,bias=True)
+
+    def forward(self, input):
+        
+        # Clippinng weight
+        weight = self.weight
+        
+        m = weight.norm(p=1).div(weight.nelement())
+        
+        thres = m * 0.7
+        mask = (weight.abs() > thres).float()
+        alpha = (mask * weight).abs().sum() / mask.sum()
+        
+
+        weight = torch.where(weight < alpha, weight, alpha)
+        weight = torch.where(weight > -1*alpha, weight, -1*alpha)
+        
+        out = nn.functional.linear(input, weight)
+        
+        if not self.bias is None:
+            out += self.bias.view(1, -1).expand_as(out)
+
+        return out
+
+class ClipEmbedding(nn.Embedding):
+
+    def __init__(self,  *kargs,padding_idx=None, config = None):
+        super(ClipEmbedding, self).__init__(*kargs,padding_idx = padding_idx)
+
+    def forward(self, input):
+        
+        # Clippinng weight
+        weight = self.weight
+        
+        m = weight.norm(p=1).div(weight.nelement())
+        
+        thres = m * 0.7
+        mask = (weight.abs() > thres).float()
+        alpha = (mask * weight).abs().sum() / mask.sum() 
+
+        weight = torch.where(weight < alpha, weight, alpha)
+        weight = torch.where(weight > -1*alpha, weight, -1*alpha)
+        
+        out = nn.functional.embedding(
+            input, weight, self.padding_idx, self.max_norm,
+            self.norm_type, self.scale_grad_by_freq, self.sparse)
+
+        return out

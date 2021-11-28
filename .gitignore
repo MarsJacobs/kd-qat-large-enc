@@ -1,5 +1,6 @@
 data
 models
+plt_storage
 output
 __pycache__
 .neptune

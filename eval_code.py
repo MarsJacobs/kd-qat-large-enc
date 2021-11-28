@@ -56,7 +56,7 @@ def get_tensor_data(output_mode, features):
     return tensor_data, all_label_ids
 
 def do_eval(model, task_name, eval_dataloader,
-            device, output_mode, eval_labels, num_labels):
+            device, output_mode, eval_labels, num_labels, teacher=False):
     eval_loss = 0
     nb_eval_steps = 0
     preds = []
@@ -66,6 +66,7 @@ def do_eval(model, task_name, eval_dataloader,
         
         with torch.no_grad():
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch_
+            
             logits, _, _ = model(input_ids, segment_ids, input_mask)
 
         # create eval loss and other metric required by the task
@@ -212,18 +213,14 @@ def main():
     parser.add_argument('--cls',
                         default =False, type=str2bool,
                         help="Whether to quantize Classifier Dense Layer")
-    
-    parser.add_argument('--aug_train',
-                        default =False, type=str2bool,
-                        help="Whether to use augmented data or not")
-
+                        
     parser.add_argument('--clipping',
                         default =False, type=str2bool,
                         help="Whether to use FP Weight Clipping")
-    
-    parser.add_argument('--downstream',
+
+    parser.add_argument('--aug_train',
                         default =False, type=str2bool,
-                        help="Downstream mode")
+                        help="Whether to use augmented data or not")
 
     parser.add_argument("--layer_num",
                         default=-1,
@@ -239,8 +236,8 @@ def main():
                         default=1.0,
                         type=float,
                         help="Ternary Clipping Value Scale Value")
-    
 
+    logger.info("==================================================>Setup...")
     args = parser.parse_args() 
 
     # ================================================================================  #
@@ -274,12 +271,8 @@ def main():
         os.mkdir(output_dir)
     
     if args.student_model is None:
-        if not args.downstream:
-            args.student_model = os.path.join("output", "BERT_base",task_name.upper())
-            #args.student_model = os.path.join("models", "BERT_base")
-        else:
-            args.student_model = os.path.join("models", "BERT_base")
-        #args.student_model = os.path.join(args.model_dir, "FFN")
+        #args.student_model = os.path.join("output", "BERT_base",task_name.upper())
+        args.student_model = os.path.join(args.model_dir, "FFN")
     if args.teacher_model is None:
         args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
         #args.teacher_model = os.path.join(args.model_dir, "FFN")
@@ -308,7 +301,7 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step":50}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step":50},
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":200},
@@ -359,6 +352,7 @@ def main():
     # ================================================================================  #
     # Dataset Setup
     # ================================================================================ #
+    
     if args.aug_train:
         try:
             train_file = os.path.join(processed_data_dir,'aug_data.pkl')
@@ -424,15 +418,16 @@ def main():
     # ================================================================================  #
     # Build Teacher Model
     # ================================================================================ # 
+    logger.info("==================================================>Build Teacher Model..")
     teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model)
 
     teacher_model.to(device)
     teacher_model.eval()
     if n_gpu > 1:
         teacher_model = torch.nn.DataParallel(teacher_model, device_ids=range(n_gpu))
-    
+    logger.info("==================================================>Teacher Model Evaluation..")
     result = do_eval(teacher_model, task_name, eval_dataloader,
-                    device, output_mode, eval_labels, num_labels)
+                    device, output_mode, eval_labels, num_labels, teacher=True)
     logger.info(result)
     
     # ================================================================================  #
@@ -458,6 +453,7 @@ def main():
     # ================================================================================  #
     # Build Student Model
     # ================================================================================ #
+    logger.info("==================================================>Build Student Model...")
     student_config = BertConfig.from_pretrained(args.teacher_model, 
                                                 quantize_act=args.act_quant,
                                                 weight_bits = args.weight_bits,
@@ -475,244 +471,10 @@ def main():
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     student_model.to(device)
-
-    # ================================================================================  #
-    # Training Start
-    # ================================================================================ #
-    
-    logger.info("***** Running training *****")
-    logger.info("  Num examples = %d", len(train_features))
-    logger.info("  Batch size = %d", args.batch_size)
-    logger.info("  Num steps = %d", num_train_optimization_steps)
-    if n_gpu > 1:
-        student_model = torch.nn.DataParallel(student_model)
-        
-    # Prepare optimizer
-    param_optimizer = list(student_model.named_parameters())
-    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
-    ]
-    schedule = 'warmup_linear'
-    optimizer = BertAdam(optimizer_grouped_parameters,
-                            schedule=schedule,
-                            lr=args.learning_rate,
-                            warmup=0.1,
-                            t_total=num_train_optimization_steps)
-    loss_mse = MSELoss()
-    global_step = 0
-    best_dev_acc = 0.0
-    previous_best = None
-    
-    tr_loss = 0.
-    tr_att_loss = 0.
-    tr_rep_loss = 0.
-    tr_cls_loss = 0.
-
-    # log_period = num_train_optimization_steps / 
-    for epoch_ in range(int(num_train_epochs)):
-        logger.info("****************************** %d Epoch ******************************", epoch_)
-        nb_tr_examples, nb_tr_steps = 0, 0
-
-        for step, batch in enumerate(train_dataloader):
-            
-            student_model.train()
-            batch = tuple(t.to(device) for t in batch)
-            input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
-            att_loss = 0.
-            rep_loss = 0.
-            cls_loss = 0.
-            loss = 0.
-            
-            student_logits, student_atts, student_reps = student_model(input_ids, segment_ids, input_mask)
-            
-            with torch.no_grad():
-                teacher_logits, teacher_atts, teacher_reps = teacher_model(input_ids, segment_ids, input_mask)
-            
-            if args.gt_loss:
-                lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
-                loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
-            
-            if args.pred_distill:
-                if output_mode == "classification":
-                    cls_loss = soft_cross_entropy(student_logits,teacher_logits)
-                elif output_mode == "regression":
-                    cls_loss = loss_mse(student_logits, teacher_logits)
-
-                loss = cls_loss
-                tr_cls_loss += cls_loss.item()
-
-            if args.intermediate_distill:
-                for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):
-                    student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to(device),
-                                                student_att)
-                    teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to(device),
-                                                teacher_att)
-                    
-                    if args.kd_layer_num != -1:
-                        if i == args.kd_layer_num:
-                            tmp_loss = loss_mse(student_att, teacher_att)
-                        else:
-                            tmp_loss = loss_mse(student_att, teacher_att)
-                            tmp_loss = tmp_loss * 0
-                    else:
-                        tmp_loss = loss_mse(student_att, teacher_att)
-
-                    att_loss += tmp_loss
-
-                for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
-                    
-                    if args.kd_layer_num != -1:
-                        if i == args.kd_layer_num:
-                            tmp_loss = loss_mse(student_rep, teacher_rep)
-                        else:
-                            tmp_loss = loss_mse(student_rep, teacher_rep)
-                            tmp_loss = tmp_loss * 0
-                    else:
-                        tmp_loss = loss_mse(student_rep, teacher_rep)
-
-                    rep_loss += tmp_loss
-                
-                loss += rep_loss + att_loss
-                tr_att_loss += att_loss.item()
-                tr_rep_loss += rep_loss.item()
-
-            if n_gpu > 1:
-                loss = loss.mean()
-
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            global_step += 1
-
-            tr_loss += loss.item()
-            nb_tr_examples += label_ids.size(0)
-            nb_tr_steps += 1
-            
-            if global_step % args.eval_step == 0 or global_step == num_train_optimization_steps-1:
-                logger.info("***** Running evaluation *****")
-                
-                logger.info("  {} step of {} steps".format(global_step, num_train_optimization_steps))
-                if previous_best is not None:
-                    logger.info(f"{fp32_performance}\nPrevious best = {previous_best}")
-
-                student_model.eval()
-
-                loss = tr_loss / (step + 1)
-                cls_loss = tr_cls_loss / (step + 1)
-                att_loss = tr_att_loss / (step + 1)
-                rep_loss = tr_rep_loss / (step + 1)
-                
-                # Logging
-                result = do_eval(student_model, task_name, eval_dataloader,
-                                    device, output_mode, eval_labels, num_labels)
-                result['global_step'] = global_step
-                result['cls_loss'] = cls_loss
-                result['att_loss'] = att_loss
-                result['rep_loss'] = rep_loss
-                result['loss'] = loss
-                
-                # for module in student_model.named_modules():
-                #     if module[1].__class__.__name__ == "QuantizeLinear":
-                #         import pdb; pdb.set_trace()
-
-
-                # summaryWriter.add_scalar('lr', optimizer.get_lr()[0], global_step)
-                # summaryWriter.add_scalar('total_loss',loss,global_step)
-                # summaryWriter.add_scalars('distill_loss',{'att_loss':att_loss,
-                #                             'rep_loss':rep_loss,
-                #                             'cls_loss':cls_loss},global_step)
-                if run is not None:
-                    run["metrics/lr"].log(optimizer.get_lr()[0])
-                    run["loss/total_loss"].log(tr_loss)
-                    run["loss/att_loss_loss"].log(tr_att_loss)
-                    run["loss/rep_loss_loss"].log(tr_rep_loss)
-                    run["loss/cls_loss_loss"].log(tr_cls_loss)
-
-                if task_name=='cola':
-                    #summaryWriter.add_scalar('mcc',result['mcc'],global_step)
-                    if run is not None:
-                        run["metrics/mcc"].log(result['mcc'])
-                    logger.info(f"Eval Result is {result['mcc']}")
-                elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
-                    #summaryWriter.add_scalar('acc',result['acc'],global_step)
-                    if run is not None:
-                        run["metrics/acc"].log(result['acc'])
-                    logger.info(f"Eval Result is {result['acc']}")
-                elif task_name in ['mrpc','qqp']:
-                    # summaryWriter.add_scalars('performance',{'acc':result['acc'],
-                    #                             'f1':result['f1'],
-                    #                             'acc_and_f1':result['acc_and_f1']},global_step)
-                    if run is not None:
-                        run["metrics/acc_and_f1"].log(result['acc_and_f1'])
-                    logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
-                else:
-                    #summaryWriter.add_scalar('corr',result['corr'],global_step)
-                    if run is not None:
-                        run["metrics/corr"].log(result['corr'])
-                    logger.info(f"Eval Result is {result['corr']}")
-
-                # Save Model
-                save_model = False
-
-                if task_name in acc_tasks and result['acc'] > best_dev_acc:
-                    if task_name in ['sst-2','mnli','qnli','rte']:
-                        previous_best = f"acc:{result['acc']}"
-                    elif task_name in ['mrpc','qqp']:
-                        previous_best = f"f1/acc:{result['f1']}/{result['acc']}"
-                    best_dev_acc = result['acc']
-                    save_model = True
-
-                if task_name in corr_tasks and result['corr'] > best_dev_acc:
-                    previous_best = f"pearson/spearmanr:{result['pearson']}/{result['spearmanr']}"
-                    best_dev_acc = result['corr']
-                    save_model = True
-
-                if task_name in mcc_tasks and result['mcc'] > best_dev_acc:
-                    previous_best = f"mcc:{result['mcc']}"
-                    best_dev_acc = result['mcc']
-                    save_model = True
-
-                if save_model:
-                    # Test mnli-mm
-                    if task_name == "mnli":
-                        result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
-                                            device, output_mode, mm_eval_labels, num_labels)
-                        previous_best+= f"mm-acc:{result['acc']}"
-                    logger.info(fp32_performance)
-                    logger.info(previous_best)
-                    if args.save_fp_model:
-                        logger.info("***** Save full precision model *****")
-                        model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
-                        output_model_file = os.path.join(output_dir, WEIGHTS_NAME)
-                        output_config_file = os.path.join(output_dir, CONFIG_NAME)
-
-                        torch.save(model_to_save.state_dict(), output_model_file)
-                        model_to_save.config.to_json_file(output_config_file)
-                        tokenizer.save_vocabulary(output_dir)
-                    if args.save_quantized_model:
-                        logger.info("====> Save quantized model *****")
-                        output_quant_dir = os.path.join(output_dir, 'quant')
-                        if not os.path.exists(output_quant_dir):
-                            os.makedirs(output_quant_dir)
-                        output_quant_dir = os.path.join(output_quant_dir, "ALL")
-                        if not os.path.exists(output_quant_dir):
-                            os.makedirs(output_quant_dir)
-                        
-                        model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
-                        quant_model = copy.deepcopy(model_to_save)
-                        for name, module in quant_model.named_modules():
-                            if hasattr(module,'weight_quantizer'):
-                                module.qweight = module.weight_quantizer.apply(module.weight,module.weight_clip_val,
-                                                                             module.weight_bits,True, student_config.mean_scale)
-                                
-                        output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
-                        output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
-
-                        torch.save(quant_model.state_dict(), output_model_file)
-                        model_to_save.config.to_json_file(output_config_file)
-                        tokenizer.save_vocabulary(output_quant_dir)
+    logger.info("==================================================>Student Model Evaluation...")
+    result = do_eval(student_model, task_name, eval_dataloader,
+                    device, output_mode, eval_labels, num_labels, teacher=False)
+    logger.info(result)
 
 
 if __name__ == "__main__":

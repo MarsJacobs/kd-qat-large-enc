@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 #CONFIG_NAME = "config_bert_base.json"
 CONFIG_NAME = "config.json"
 WEIGHTS_NAME = "pytorch_model.bin"
-#WEIGHTS_NAME = "SST_renamed.bin"
+#WEIGHTS_NAME = "FFN_GT_KD_AUG.bin"
 
 def gelu(x):
     """Implementation of the gelu activation function.
@@ -70,7 +70,7 @@ class BertEmbeddings(nn.Module):
 
 
 class BertSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertSelfAttention, self).__init__()
         if config.hidden_size % config.num_attention_heads != 0:
             raise ValueError(
@@ -84,6 +84,7 @@ class BertSelfAttention(nn.Module):
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.i = i
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[
@@ -105,6 +106,8 @@ class BertSelfAttention(nn.Module):
         if attention_mask is not None:
             attention_scores = attention_scores + attention_mask
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        
+        #torch.save(attention_probs, f"FP_layer_{self.i}_attn_probs.pth")
         attention_probs = self.dropout(attention_probs)
 
         context_layer = torch.matmul(attention_probs, value_layer)
@@ -115,7 +118,7 @@ class BertSelfAttention(nn.Module):
 
 
 class BertSelfOutput(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertSelfOutput, self).__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -128,10 +131,10 @@ class BertSelfOutput(nn.Module):
         return hidden_states
 
 class BertAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertAttention, self).__init__()
-        self.self = BertSelfAttention(config)
-        self.output = BertSelfOutput(config)
+        self.self = BertSelfAttention(config, i)
+        self.output = BertSelfOutput(config, i)
 
     def forward(self, input_tensor, attention_mask):
         self_output, layer_att = self.self(input_tensor, attention_mask)
@@ -140,36 +143,43 @@ class BertAttention(nn.Module):
 
 
 class BertIntermediate(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertIntermediate, self).__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
+        
+        self.i = i
 
     def forward(self, hidden_states):
+        #torch.save(hidden_states, f"FP_layer_{self.i}_ffn1_input.pt")
         hidden_states = self.dense(hidden_states)
         hidden_states = gelu(hidden_states)
         return hidden_states
 
 
 class BertOutput(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertOutput, self).__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
+        self.i = i
+
     def forward(self, hidden_states, input_tensor):
         hidden_states = self.dense(hidden_states)
+        #torch.save(hidden_states, f"FP_layer_{self.i}_ffn2_output.pt")
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        #torch.save(hidden_states, f"FP_layer_{self.i}_ffn2_Layernorm_output.pt")
         return hidden_states
 
 
 class BertLayer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, i):
         super(BertLayer, self).__init__()
-        self.attention = BertAttention(config)
-        self.intermediate = BertIntermediate(config)
-        self.output = BertOutput(config)
+        self.attention = BertAttention(config, i)
+        self.intermediate = BertIntermediate(config, i)
+        self.output = BertOutput(config, i)
 
     def forward(self, hidden_states, attention_mask):
         attention_output, layer_att = self.attention(
@@ -183,8 +193,8 @@ class BertLayer(nn.Module):
 class BertEncoder(nn.Module):
     def __init__(self, config):
         super(BertEncoder, self).__init__()
-        self.layer = nn.ModuleList([BertLayer(config)
-                                    for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList([BertLayer(config, i)
+                                    for i in range(config.num_hidden_layers)])
 
     def forward(self, hidden_states, attention_mask):
         
@@ -260,7 +270,7 @@ class BertPreTrainedModel(nn.Module):
             config_file = os.path.join(pretrained_model_name_or_path, CONFIG_NAME)
             config = BertConfig.from_json_file(config_file)
 
-        logger.info("Model config {}".format(config))
+        #logger.info("Model config {}".format(config))
         # Instantiate model.
 
         model = cls(config, *inputs, **kwargs)
