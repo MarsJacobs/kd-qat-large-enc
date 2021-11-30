@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.utils import _quadruple
-import dorefa
+import dorefa as dorefa
 
 # if sys.version_info[0] == 3:
 #     #from . import alqnet as alqnet
@@ -15,6 +15,8 @@ import dorefa
 #     #from . import xnor as xnor
 
 __EPS__ = 0 #1e-5
+
+logger = logging.getLogger(__name__)
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -34,42 +36,43 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 class quantization(nn.Module):
-    def __init__(self, args=None, tag='fm', shape=[], feature_stride=None, logger=None, groups=1, weight = None, senqnn_config=None):
+    def __init__(self, feature_stride=None, logger=None, weight = None, shape=[], tag='wt', config=None):
         super(quantization, self).__init__()
-        self.senqnn_config = senqnn_config
-        self.args = args
-        self.logger = logger
+        
+        self.args = None
+        self.config = config
+        
         self.index = -1
-        self.tag = tag
+        self.tag = 'wt'
         self.method = 'none'
         self.choice = 'none'
-        if logger is None:
-            if hasattr(args, 'logger'):
-                self.logger = args.logger
-            else:
-                logger_root = args.logger_root + '.' if hasattr(args, 'logger_root') else ''
-                self.logger = logging.getLogger(logger_root + __name__)
+        # if logger is None:
+        #     if hasattr(args, 'logger'):
+        #         self.logger = args.logger
+        #     else:
+        #         logger_root = args.logger_root + '.' if hasattr(args, 'logger_root') else ''
+        #         self.logger = logging.getLogger(logger_root + __name__)
 
         self.shape = shape
-        self.feature_stride = feature_stride
-        self.enable = getattr(args, tag + '_enable', False)
-        self.adaptive = getattr(self.args, self.tag + '_adaptive', 'none')
-        self.grad_scale = getattr(self.args, self.tag + '_grad_scale', 'none')
-        self.grad_type = getattr(args, tag + '_grad_type', 'none')
-        self.custom = getattr(args, tag + '_custom', 'none')
-        self.bit = getattr(args, tag + '_bit', None)
-        self.num_levels = getattr(args, tag + '_level', None)
-        self.half_range = getattr(args, tag + '_half_range', None)
-        self.scale = getattr(args, tag + '_scale', 0.5)
-        self.ratio = getattr(args, tag + '_ratio', 1.0)
-        self.correlate = getattr(args, tag + '_correlate', -1.0)
-        self.quant_group = getattr(args, tag + '_quant_group', None)
-        self.boundary = getattr(self.args, self.tag + '_boundary', None)
+        self.feature_stride = None #feature_stride
+        self.enable = False # getattr(args, tag + '_enable', False)
+        self.adaptive = 'none' # getattr(self.args, self.tag + '_adaptive', 'none')
+        self.grad_scale = 'none' # getattr(self.args, self.tag + '_grad_scale', 'none')
+        self.grad_type = 'none' # getattr(args, tag + '_grad_type', 'none')
+        self.custom = 'none' # getattr(args, tag + '_custom', 'none')
+        self.bit = 2 # getattr(args, tag + '_bit', None)
+        self.num_levels = None # getattr(args, tag + '_level', None)
+        self.half_range = None # getattr(args, tag + '_half_range', None)
+        self.scale = 0.5 # getattr(args, tag + '_scale', 0.5)
+        self.ratio = 1.0 # getattr(args, tag + '_ratio', 1.0)
+        self.correlate = -1.0 # getattr(args, tag + '_correlate', -1.0)
+        self.quant_group = None # getattr(args, tag + '_quant_group', None)
+        self.boundary = None # getattr(self.args, self.tag + '_boundary', None)
         
         self.weight = weight # MSKIM Weight for initialization
         
-        if self.bit is None:
-            self.bit = senqnn_config['nbits_w']
+        # if self.bit is None:
+        #     self.bit = senqnn_config['nbits_w']
 
         if self.num_levels is None or self.num_levels <= 0:
             self.num_levels = int(2 ** self.bit)
@@ -82,7 +85,7 @@ class quantization(nn.Module):
         else:
             self.half_range = bool(self.half_range)
 
-        self.grain = groups if 'grain' in getattr(self.args, 'keyword', []) else 1
+        self.grain = 1 # groups if 'grain' in getattr(self.args, 'keyword', []) else 1
         if self.quant_group == 0:
             self.quant_group = None
         if self.quant_group is not None:
@@ -98,36 +101,40 @@ class quantization(nn.Module):
             self.quant_group = int(self.quant_group)
         else:
             # layer wise for feature map, channel wise for weight
-            self.quant_group = shape[0] if self.tag == 'wt' else 1
+            self.quant_group = 1 #shape[0] if self.tag == 'wt' else 1
             ## channel wise for both
             #self.quant_group = shape[0] if self.tag == 'wt' else shape[1]
-        self.norm_group = 1 if 'independent_norm' in getattr(self.args, 'keyword', []) else self.quant_group
+        
+        #self.norm_group = 1 if 'independent_norm' in getattr(self.args, 'keyword', []) else self.quant_group # **
+        self.norm_group = 1
 
         self.repeat_mark = 0
         self.input_index = ""
 
         self.fan = 1 # mode = 'fan_in' as default 
-        for i in range(len(self.shape)-1):
-            self.fan *= self.shape[i+1]
+
+        # for i in range(len(self.shape)-1):
+        #     self.fan *= self.shape[i+1]
 
         self.nElements = 1
+
         for i in self.shape:
             self.nElements = self.nElements * i
         self.nElements = self.nElements // self.quant_group
-        if self.tag in ['fm', 'ot']:
-            batch_size = getattr(args, 'batch_size', 1)
-            batch_size = getattr(args, 'batch_size_per_machine', batch_size)
-            self.nElements *= batch_size
-            if feature_stride is not None and hasattr(args, 'input_size') and args.input_size is not None:
-                self.nElements *= (args.input_size // feature_stride)
-                self.nElements *= (args.input_size // feature_stride)
+        # if self.tag in ['fm', 'ot']:
+        #     batch_size = getattr(args, 'batch_size', 1)
+        #     batch_size = getattr(args, 'batch_size_per_machine', batch_size)
+        #     self.nElements *= batch_size
+        #     if feature_stride is not None and hasattr(args, 'input_size') and args.input_size is not None:
+        #         self.nElements *= (args.input_size // feature_stride)
+        #         self.nElements *= (args.input_size // feature_stride)
 
-        if 'proxquant' in getattr(self.args, 'keyword', []):
-            self.prox = 0
+        # if 'proxquant' in getattr(self.args, 'keyword', []):
+        #     self.prox = 0
 
-        self.stable = getattr(args, self.tag + '_stable', 0)
+        self.stable = 0 #getattr(args, self.tag + '_stable', 0)
         if self.stable <= 0:
-            self.stable = getattr(args, 'stable', 0)
+            self.stable = 0 #getattr(args, 'stable', 0)
 
         self.iteration = nn.Parameter(torch.zeros(1), requires_grad=False)
         self.level_num = nn.Parameter(torch.zeros(1), requires_grad=False)
@@ -136,14 +143,16 @@ class quantization(nn.Module):
         self.quant_loss_enable = False
         self.quant_loss_function = 'None'
         self.quant_loss_alpha = 0.0
+ 
         self.init()
         self.level_num.fill_(self.num_levels)
 
+
         # self.logger.info("half_range({}), bit({}), num_levels({}), quant_group({}) boundary({}) scale({}) ratio({}) tag({})".format(
         #     self.half_range, self.bit, self.num_levels, self.quant_group, self.boundary, self.scale, self.ratio, self.tag))
-        if 'debug' in getattr(self.args, 'keyword', []):
-            self.logger.info("adaptive({}) grad_scale({}) grad_type({}) norm_group({}) progressive({})".format(
-                self.adaptive, self.grad_scale, self.grad_type, self.norm_group, self.progressive))
+        # if 'debug' in getattr(self.args, 'keyword', []):
+        #     self.logger.info("adaptive({}) grad_scale({}) grad_type({}) norm_group({}) progressive({})".format(
+        #         self.adaptive, self.grad_scale, self.grad_type, self.norm_group, self.progressive))
 
     def __repr__(self):
         return self.__str__()
@@ -162,9 +171,8 @@ class quantization(nn.Module):
         self.method = 'dorefa'
         self.gamma = 1.
         
-        self.boundary = (self.weight.detach().abs().mean() * 2 * self.senqnn_config['init_scaling']) / ((self.grad_num_levels - 1) ** 0.5) # MSKIM LSQ Weight Intialization
-        
-        #self.logger.info('update %s_boundary %r' % (self.tag, self.boundary))
+        self.boundary = (self.weight.detach().abs().mean() * 2 * self.config.init_scaling) / ((self.grad_num_levels - 1) ** 0.5) # MSKIM LSQ Weight Intialization
+        #logger.info('update %s_boundary %r' % (self.tag, self.boundary))
         
         self.grad_factor = {
                 'none': 1.0,
@@ -188,8 +196,8 @@ class quantization(nn.Module):
             
         elif self.tag == 'wt':
             
-            if self.shape[0] == 1 and self.quant_group != 1:  ## linear
-                raise RuntimeError("Quantization-{} for linear layer not provided".format(self.tag))
+            # if self.shape[0] == 1 and self.quant_group != 1:  ## linear
+            #     raise RuntimeError("Quantization-{} for linear layer not provided".format(self.tag))
             self.clip_val = nn.Parameter(torch.zeros(self.quant_group, 1, 1, 1))
             self.clip_val.data.fill_(self.boundary)
             self.quant = dorefa.LSQ
@@ -227,25 +235,25 @@ class quantization(nn.Module):
             #         self.gamma = nn.Parameter(torch.ones(self.quant_group, 1, 1, 1))
             #         self.gamma.data.fill_(np.sqrt(2 / self.shape[0]))
             #     self.choice = self.choice + '-with-gamma'
-        elif self.tag == 'ot':
-            if 'lsq' in self.args.keyword or 'ot_lsq' in self.args.keyword:
-                if self.quant_group == 1:
-                    self.clip_val = nn.Parameter(torch.Tensor([self.boundary]))
-                else:
-                    self.clip_val = nn.Parameter(torch.zeros(1, self.quant_group, 1, 1))
-                self.clip_val.data.fill_(self.boundary)
-                self.quant = dorefa.LSQ
-                self.clamp = dorefa.ClampWithScale if self.grad_type in ['STE-scale'] else torch.clamp
-                self.choice = 'lsq'
-            elif 'non-uniform' in self.args.keyword or 'pact' in self.args.keyword:
-                raise RuntimeError("error keyword for the method, specific accurate tag please")
-            else: # Dorefa-Net
-                self.quant = dorefa.qfn
-                self.clip_val = self.boundary
-                self.choice = 'dorefa-net'
-            if 'gamma' in self.args.keyword or 'ot_gamma' in self.args.keyword:
-                self.gamma = nn.Parameter(torch.ones(1, self.quant_group, 1, 1))
-                self.choice = self.choice + '-with-gamma'
+        # elif self.tag == 'ot':
+        #     if 'lsq' in self.args.keyword or 'ot_lsq' in self.args.keyword:
+        #         if self.quant_group == 1:
+        #             self.clip_val = nn.Parameter(torch.Tensor([self.boundary]))
+        #         else:
+        #             self.clip_val = nn.Parameter(torch.zeros(1, self.quant_group, 1, 1))
+        #         self.clip_val.data.fill_(self.boundary)
+        #         self.quant = dorefa.LSQ
+        #         self.clamp = dorefa.ClampWithScale if self.grad_type in ['STE-scale'] else torch.clamp
+        #         self.choice = 'lsq'
+        #     elif 'non-uniform' in self.args.keyword or 'pact' in self.args.keyword:
+        #         raise RuntimeError("error keyword for the method, specific accurate tag please")
+        #     else: # Dorefa-Net
+        #         self.quant = dorefa.qfn
+        #         self.clip_val = self.boundary
+        #         self.choice = 'dorefa-net'
+        #     if 'gamma' in self.args.keyword or 'ot_gamma' in self.args.keyword:
+        #         self.gamma = nn.Parameter(torch.ones(1, self.quant_group, 1, 1))
+        #         self.choice = self.choice + '-with-gamma'
         else:
             raise RuntimeError("error tag for the method")
 
@@ -407,7 +415,7 @@ class quantization(nn.Module):
         scaled = [1.0/x if abs(alpha[i]) < 1.0 else x for i, x in enumerate(scaled)]
         return np.array(scaled)
 
-    def forward(self, x):
+    def forward(self, x, layerwise=None):
 
         # if 'eval' in self.args.keyword and self.tag == 'fm' and 'skip' not in self.input_index:
         #     assert self.quant_group == 1 and self.method == 'dorefa' and self.half_range
@@ -431,8 +439,8 @@ class quantization(nn.Module):
 
         if self.method == 'dorefa':
             if self.tag in ['fm', 'ot']:
-                clip_val = dorefa.GradientScale(self.clip_val.abs(), self.grad_factor)
-                if self.half_range:
+                clip_val = dorefa.GradientScale(self.clip_val.abs(), self.grad_factor) 
+                if self.half_range: # False in Weight Quantization
                     y = x.div(clip_val)
                     y = self.clamp(y, min=0, max=1)
                     y = self.quant.apply(y, self.level_num.item() - 1)
@@ -446,6 +454,7 @@ class quantization(nn.Module):
                     y = y * clip_val
                 
             elif self.tag == 'wt':
+                
                 if self.adaptive == 'var-mean':
                     if hasattr(torch, 'std_mean'):
                         std, mean = torch.std_mean(x.data.reshape(self.norm_group, -1, 1, 1, 1), 1)
@@ -455,10 +464,9 @@ class quantization(nn.Module):
                         mean = torch.mean(_data, 1)
                     x = (x - mean) / (std + __EPS__)
                 
-                
                 # Add Gradient Scaling MSKIM
-                if self.senqnn_config['gradient_scaling'] is not None:
-                    grad_factor = self.senqnn_config['gradient_scaling'] / (((self.grad_num_levels -1) * x.numel()) ** 0.5)
+                if self.config.gradient_scaling is not None:
+                    grad_factor = self.config.gradient_scaling / (((self.grad_num_levels -1) * x.numel()) ** 0.5)
                     #grad_factor = 1
                 else:
                     grad_factor = 1

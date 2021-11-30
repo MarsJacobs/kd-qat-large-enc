@@ -188,6 +188,12 @@ def main():
                         action='store_true',
                         help="neptune logging option")
     
+    #MSKIM Quantization Option
+    parser.add_argument("--quantizer",
+                        default="ternary",
+                        type=str,
+                        help="Quantization Method")
+
     #MSKIM Quantization Range Option
     parser.add_argument('--quantize',
                         default =False, type=str2bool,
@@ -225,6 +231,10 @@ def main():
                         default =False, type=str2bool,
                         help="Downstream mode")
 
+    parser.add_argument('--gradient_scaling',
+                        default =1, type=float,
+                        help="LSQ gradient scaling")
+
     parser.add_argument("--layer_num",
                         default=-1,
                         type=int,
@@ -236,13 +246,27 @@ def main():
                         help="Number of layer to Apply KD (-1 : Distill every layer")
     
     parser.add_argument("--mean_scale",
-                        default=1.0,
+                        default=0.7,
                         type=float,
                         help="Ternary Clipping Value Scale Value")
     
+    parser.add_argument("--init_scaling",
+                        default=1.,
+                        type=float,
+                        help="LSQ/PACT Clipping Init Value Scaling Value")
+    
+    parser.add_argument("--lr_scaling",
+                        default=1.,
+                        type=float,
+                        help="LSQ/PACT Clipping Learning Rate Scaling Value")
+    
+    parser.add_argument("--clip_wd",
+                        default=0.3,
+                        type=float,
+                        help="PACT Clip Value Weight Decay")
 
     args = parser.parse_args() 
-
+    
     # ================================================================================  #
     # Logging setup
     # ================================================================================ #
@@ -308,7 +332,7 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step":50}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 50}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":200},
@@ -471,35 +495,40 @@ def main():
                                                 cls_q = args.cls,
                                                 clipping = args.clipping,
                                                 layer_num = args.layer_num,
-                                                mean_scale = args.mean_scale)
+                                                mean_scale = args.mean_scale,
+                                                quantizer = args.quantizer,
+                                                init_scaling = args.init_scaling,
+                                                gradient_scaling = args.gradient_scaling)
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     student_model.to(device)
 
     # ================================================================================  #
-    # Training Start
+    # Training Setting
     # ================================================================================ #
     
-    logger.info("***** Running training *****")
-    logger.info("  Num examples = %d", len(train_features))
-    logger.info("  Batch size = %d", args.batch_size)
-    logger.info("  Num steps = %d", num_train_optimization_steps)
     if n_gpu > 1:
         student_model = torch.nn.DataParallel(student_model)
         
     # Prepare optimizer
     param_optimizer = list(student_model.named_parameters())
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+    clip_decay = ['clip_val', 'clip_valn']
+
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in (no_decay+clip_decay))], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+        {'params': [p for n, p in param_optimizer if any(cv in n for cv in clip_decay)],\
+         'weight_decay': args.clip_wd if args.quantizer == "pact" else 0, 'lr': args.learning_rate * args.lr_scaling}
     ]
+    
     schedule = 'warmup_linear'
     optimizer = BertAdam(optimizer_grouped_parameters,
                             schedule=schedule,
                             lr=args.learning_rate,
                             warmup=0.1,
                             t_total=num_train_optimization_steps)
+    
     loss_mse = MSELoss()
     global_step = 0
     best_dev_acc = 0.0
@@ -510,7 +539,21 @@ def main():
     tr_rep_loss = 0.
     tr_cls_loss = 0.
 
-    # log_period = num_train_optimization_steps / 
+    
+    # ================================================================================  #
+    # Training Start
+    # ================================================================================ #
+
+    logger.info("***** Running training *****")
+    logger.info("  Num examples = %d", len(train_features))
+    logger.info("  Batch size = %d", args.batch_size)
+    logger.info("  Num steps = %d", num_train_optimization_steps)
+
+    # Init Clip Value Logging
+    for n, p in student_model.named_parameters():
+        if "clip_val" in n:
+            run[f"clip_val/{n}"].log(p)
+
     for epoch_ in range(int(num_train_epochs)):
         logger.info("****************************** %d Epoch ******************************", epoch_)
         nb_tr_examples, nb_tr_steps = 0, 0
@@ -624,6 +667,9 @@ def main():
                 #                             'rep_loss':rep_loss,
                 #                             'cls_loss':cls_loss},global_step)
                 if run is not None:
+                    for n, p in student_model.named_parameters():
+                        if "clip_val" in n:
+                            run[f"clip_val/{n}"].log(p)
                     run["metrics/lr"].log(optimizer.get_lr()[0])
                     run["loss/total_loss"].log(tr_loss)
                     run["loss/att_loss_loss"].log(tr_att_loss)
@@ -693,9 +739,11 @@ def main():
                         tokenizer.save_vocabulary(output_dir)
                     if args.save_quantized_model:
                         logger.info("====> Save quantized model *****")
+
                         output_quant_dir = os.path.join(output_dir, 'quant')
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)
+                        
                         output_quant_dir = os.path.join(output_quant_dir, "ALL")
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)

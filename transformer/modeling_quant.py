@@ -32,11 +32,8 @@ from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer, ClipLi
 
 logger = logging.getLogger(__name__)
 
-#CONFIG_NAME = "config_bert_base.json"
-#WEIGHTS_NAME = "SST_renamed.bin"
 CONFIG_NAME = "config.json"
 WEIGHTS_NAME = "pytorch_model.bin"
-#WEIGHTS_NAME = "cola_dw.bin"
 
 def gelu(x):
     """Implementation of the gelu activation function.
@@ -440,8 +437,9 @@ class BertPreTrainedModel(nn.Module):
         load(model, prefix=start_prefix)
         logger.info('done!')
         if len(missing_keys) > 0:
-            logger.info("Weights of {} not initialized from pretrained model: {}".format(
-                model.__class__.__name__, missing_keys))
+            # logger.info("Weights of {} not initialized from pretrained model: {}".format(
+            #     model.__class__.__name__, missing_keys))
+            pass
         if len(unexpected_keys) > 0:
             logger.info("Weights from pretrained model not used in {}: {}".format(
                 model.__class__.__name__, unexpected_keys))

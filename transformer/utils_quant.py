@@ -1,12 +1,22 @@
 import torch
 import torch.nn as nn
+import sys
+import logging
+
+from .pact_func import *
+from .lsq import *
+
+log_format = '%(asctime)s %(message)s'
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                    format=log_format, datefmt='%m/%d %I:%M:%S %p')
+logger = logging.getLogger()
 
 class SymQuantizer(torch.autograd.Function):
     """
         uniform quantization
     """
     @staticmethod
-    def forward(ctx, input, clip_val, num_bits, layerwise):
+    def forward(ctx, input, clip_val=2.5, num_bits=2, layerwise=False):
         """
         :param ctx:
         :param input: tensor to be quantized
@@ -112,7 +122,7 @@ class TwnQuantizer(torch.autograd.Function):
     Ref: https://arxiv.org/abs/1605.04711
     """
     @staticmethod
-    def forward(ctx, input, clip_val, num_bits, layerwise):
+    def forward(ctx, input, clip_val=2.5, num_bits=2, layerwise=False):
         """
         :param input: tensor to be ternarized
         :return: quantized tensor
@@ -164,11 +174,21 @@ class QuantizeLinear(nn.Linear):
         self.quantize_act = config.quantize_act
         self.mean_scale = config.mean_scale
         self.qweight = None
-
+        
         if self.weight_bits == 2:
-            self.weight_quantizer = TwnQuantizer
+            if config.quantizer == "ternary":
+                self.weight_quantizer = TwnQuantizer
+            if config.quantizer == "pact":
+                self.weight_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.weight_bits,
+                                                                         init_clip_val = self.weight.abs().mean() * 0.5,
+                                                                         init_clip_valn = self.weight.abs().mean() * -0.5,
+                                                                         dequantize = True, 
+                                                                         inplace = False)
+            if config.quantizer == 'lsq':
+                self.weight_quantizer = quantization(weight = self.weight, config=config)
         else:
             self.weight_quantizer = SymQuantizer
+
         self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
         if self.quantize_act:
             self.input_bits = config.input_bits
@@ -176,17 +196,24 @@ class QuantizeLinear(nn.Linear):
             self.register_buffer('act_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
 
     def forward(self, input):
-        # quantize weight
-        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)
-        # quantize input
         
+        # quantize weight
+        weight = self.weight_quantizer(self.weight, layerwise=True)
+    
+        # quantize input
         if self.quantize_act:
             input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
+        
+        # nn.Linear w/ Quantized input and output
         out = nn.functional.linear(input, weight)
+        
         if not self.bias is None:
             out += self.bias.view(1, -1).expand_as(out)
 
         return out
+
+    def __repr__(self):
+        return '{0}(num_bits_weight={1}, w_quant_fn={2})'.format(self.__class__.__name__, self.weight_bits, self.weight_quantizer)
 
     # MSKIM get Ternary Weight Quantization's Threshold and Alpha Value
     def get_thres_alpha(self):
@@ -215,19 +242,29 @@ class QuantizeEmbedding(nn.Embedding):
         
 
         if self.weight_bits == 2:
-            self.weight_quantizer = TwnQuantizer
-        else:
-            self.weight_quantizer = SymQuantizer
+            if config.quantizer == "ternary":
+                self.weight_quantizer = TwnQuantizer
+            if config.quantizer == "pact":
+                self.weight_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.weight_bits,
+                                                                         init_clip_val = self.weight.abs().mean() * 0.5, 
+                                                                         init_clip_valn = self.weight.abs().mean() * -0.5,
+                                                                         dequantize = True, 
+                                                                         inplace = False)      
+            if config.quantizer == 'lsq':
+                self.weight_quantizer = quantization(weight = self.weight, config=config)
 
         self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
 
     def forward(self, input):
+        weight = self.weight_quantizer(self.weight, layerwise=self.layerwise)
         
-        weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits,self.layerwise)
         out = nn.functional.embedding(
             input, weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
         return out
+
+    def __repr__(self):
+        return '{0}(num_bits_weight={1}, w_quant_fn={2})'.format(self.__class__.__name__, self.weight_bits, self.weight_quantizer)
 
     def get_thres_alpha(self):
 

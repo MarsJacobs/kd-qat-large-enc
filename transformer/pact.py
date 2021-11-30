@@ -10,7 +10,7 @@ from collections import OrderedDict
 import os.path
 import sys
 sys.path.append(" . ")
-from quant import *
+from pact_func import *
 import pdb
 import numpy as np
 

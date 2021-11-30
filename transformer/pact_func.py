@@ -96,6 +96,7 @@ class LearnedTwosidedClippedLinearQuantizeSTE(torch.autograd.Function):
             output = torch.where(output<clip_valn, torch.ones_like(input)*clip_valn, output) 
         else:
             output = clamp(input, clip_valn.data, clip_val.data, inplace)
+        
         output = linear_quantize(output, scale, zero_point, inplace)
         if dequantize:
             output = linear_dequantize(output, scale, zero_point, inplace)
@@ -138,7 +139,7 @@ class LearnedTwosidedClippedLinearQuantization(nn.Module):
         self.inplace = inplace
         self.CGGrad = CGGrad
 
-    def forward(self, input):
+    def forward(self, input, layerwise=None):
         if self.CGGrad:
             input = CGLearnedTwosidedClippedLinearQuantizeSTE.apply(input, self.clip_val, self.clip_valn, self.num_bits, self.dequantize, self.inplace)
             pass
@@ -148,7 +149,7 @@ class LearnedTwosidedClippedLinearQuantization(nn.Module):
         return input
 
     def __repr__(self):
-        clip_str = ', pos-clip={}, neg-clip={}'.format(self.clip_val[0], self.clip_valn[0])
+        clip_str = ', pos-clip={}, neg-clip={}'.format(self.clip_val, self.clip_valn)
         inplace_str = ', inplace' if self.inplace else ''
         return '{0}(num_bits={1}{2}{3})'.format(self.__class__.__name__, self.num_bits, clip_str, inplace_str)
 
@@ -286,6 +287,7 @@ def symmetric_linear_quantization_params(num_bits, saturation_val):
 
 def asymmetric_linear_quantization_params(num_bits, saturation_min, saturation_max,
                                           integral_zero_point=True, signed=False):
+    
     with torch.no_grad():                                      
         scalar_min, sat_min = _prep_saturation_val_tensor(saturation_min)
         scalar_max, sat_max = _prep_saturation_val_tensor(saturation_max)
