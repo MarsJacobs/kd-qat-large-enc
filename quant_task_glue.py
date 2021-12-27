@@ -185,7 +185,7 @@ def main():
                         help="Whether to quantize activation")
     
     parser.add_argument('--neptune',
-                        action='store_true',
+                        default=True, type=str2bool,
                         help="neptune logging option")
     
     #MSKIM Quantization Option
@@ -250,6 +250,21 @@ def main():
                         type=float,
                         help="Ternary Clipping Value Scale Value")
     
+    parser.add_argument("--clip_ratio",
+                        default=0.7,
+                        type=float,
+                        help="Clip Value Init raio")
+
+    parser.add_argument("--clip_method",
+                        default="minmax",
+                        type=str,
+                        help="Clip Value Init Method")
+
+    parser.add_argument("--exp_name",
+                        default="",
+                        type=str,
+                        help="Output Directory Name")
+    
     parser.add_argument("--init_scaling",
                         default=1.,
                         type=float,
@@ -297,10 +312,15 @@ def main():
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     
+# ================================================================================  #
+# Load Pths
+# ================================================================================ #
+
     if args.student_model is None:
         if not args.downstream:
             args.student_model = os.path.join("output", "BERT_base",task_name.upper())
             #args.student_model = os.path.join("models", "BERT_base")
+            #args.student_model = os.path.join(args.model_dir, "FFN")
         else:
             args.student_model = os.path.join("models", "BERT_base")
         #args.student_model = os.path.join(args.model_dir, "FFN")
@@ -339,7 +359,7 @@ def main():
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":50},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "qnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
-        "rte": {"max_seq_length": 128,"batch_size":32,"eval_step":100}
+        "rte": {"max_seq_length": 128,"batch_size":32,"eval_step":570 if args.aug_train else 100}
     }
 
     acc_tasks = ["mnli", "mrpc", "sst-2", "qqp", "qnli", "rte"]
@@ -498,11 +518,20 @@ def main():
                                                 mean_scale = args.mean_scale,
                                                 quantizer = args.quantizer,
                                                 init_scaling = args.init_scaling,
-                                                gradient_scaling = args.gradient_scaling)
+                                                clip_ratio = args.clip_ratio,
+                                                gradient_scaling = args.gradient_scaling,
+                                                clip_method = args.clip_method)
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
+    
+    for name, module in student_model.named_modules():
+        if hasattr(module,'weight_quantizer'):
+            module.clip_initialize()
+            #print(f"{name[13:]} {(module.weight.std()*3 / module.weight.max()).item():.2f} {(module.weight.std()*-3 / module.weight.min()).item():.2f}")
+            
+    #import pdb; pdb.set_trace()
     student_model.to(device)
-
+    
     # ================================================================================  #
     # Training Setting
     # ================================================================================ #
@@ -553,7 +582,7 @@ def main():
     for n, p in student_model.named_parameters():
         if "clip_val" in n:
             run[f"clip_val/{n}"].log(p)
-
+    
     for epoch_ in range(int(num_train_epochs)):
         logger.info("****************************** %d Epoch ******************************", epoch_)
         nb_tr_examples, nb_tr_steps = 0, 0
@@ -624,10 +653,19 @@ def main():
             if n_gpu > 1:
                 loss = loss.mean()
 
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
             global_step += 1
+
+            loss.backward()
+
+            if global_step % args.eval_step == 0 or global_step == num_train_optimization_steps-1:
+                for n, p in student_model.named_parameters():
+                    if "clip_val" in n:
+                        run[f"grad/{n}"].log(p.grad)
+                    
+            optimizer.step()
+
+            optimizer.zero_grad()
+            
 
             tr_loss += loss.item()
             nb_tr_examples += label_ids.size(0)
@@ -658,9 +696,7 @@ def main():
                 
                 # for module in student_model.named_modules():
                 #     if module[1].__class__.__name__ == "QuantizeLinear":
-                #         import pdb; pdb.set_trace()
-
-
+                
                 # summaryWriter.add_scalar('lr', optimizer.get_lr()[0], global_step)
                 # summaryWriter.add_scalar('total_loss',loss,global_step)
                 # summaryWriter.add_scalars('distill_loss',{'att_loss':att_loss,
@@ -744,7 +780,7 @@ def main():
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)
                         
-                        output_quant_dir = os.path.join(output_quant_dir, "ALL")
+                        output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)
                         
@@ -752,8 +788,7 @@ def main():
                         quant_model = copy.deepcopy(model_to_save)
                         for name, module in quant_model.named_modules():
                             if hasattr(module,'weight_quantizer'):
-                                module.qweight = module.weight_quantizer.apply(module.weight,module.weight_clip_val,
-                                                                             module.weight_bits,True, student_config.mean_scale)
+                                module.qweight = module.weight_quantizer(module.weight, True)
                                 
                         output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
                         output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)

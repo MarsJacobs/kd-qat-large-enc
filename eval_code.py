@@ -66,7 +66,7 @@ def do_eval(model, task_name, eval_dataloader,
         
         with torch.no_grad():
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch_
-            
+            if not teacher:
             logits, _, _ = model(input_ids, segment_ids, input_mask)
 
         # create eval loss and other metric required by the task
@@ -189,6 +189,12 @@ def main():
                         action='store_true',
                         help="neptune logging option")
     
+    #MSKIM Quantization Option
+    parser.add_argument("--quantizer",
+                        default="ternary",
+                        type=str,
+                        help="Quantization Method")
+
     #MSKIM Quantization Range Option
     parser.add_argument('--quantize',
                         default =False, type=str2bool,
@@ -213,14 +219,22 @@ def main():
     parser.add_argument('--cls',
                         default =False, type=str2bool,
                         help="Whether to quantize Classifier Dense Layer")
-                        
-    parser.add_argument('--clipping',
-                        default =False, type=str2bool,
-                        help="Whether to use FP Weight Clipping")
-
+    
     parser.add_argument('--aug_train',
                         default =False, type=str2bool,
                         help="Whether to use augmented data or not")
+
+    parser.add_argument('--clipping',
+                        default =False, type=str2bool,
+                        help="Whether to use FP Weight Clipping")
+    
+    parser.add_argument('--downstream',
+                        default =False, type=str2bool,
+                        help="Downstream mode")
+
+    parser.add_argument('--gradient_scaling',
+                        default =1, type=float,
+                        help="LSQ gradient scaling")
 
     parser.add_argument("--layer_num",
                         default=-1,
@@ -233,9 +247,24 @@ def main():
                         help="Number of layer to Apply KD (-1 : Distill every layer")
     
     parser.add_argument("--mean_scale",
-                        default=1.0,
+                        default=0.7,
                         type=float,
                         help="Ternary Clipping Value Scale Value")
+    
+    parser.add_argument("--init_scaling",
+                        default=1.,
+                        type=float,
+                        help="LSQ/PACT Clipping Init Value Scaling Value")
+    
+    parser.add_argument("--lr_scaling",
+                        default=1.,
+                        type=float,
+                        help="LSQ/PACT Clipping Learning Rate Scaling Value")
+    
+    parser.add_argument("--clip_wd",
+                        default=0.3,
+                        type=float,
+                        help="PACT Clip Value Weight Decay")
 
     logger.info("==================================================>Setup...")
     args = parser.parse_args() 
@@ -348,7 +377,7 @@ def main():
     # Load Vocab FIle -> Tokenization 
     # ================================================================================ #
     tokenizer = BertTokenizer.from_pretrained(args.student_model, do_lower_case=True)
-
+    
     # ================================================================================  #
     # Dataset Setup
     # ================================================================================ #
@@ -467,7 +496,10 @@ def main():
                                                 cls_q = args.cls,
                                                 clipping = args.clipping,
                                                 layer_num = args.layer_num,
-                                                mean_scale = args.mean_scale)
+                                                mean_scale = args.mean_scale,
+                                                quantizer = args.quantizer,
+                                                init_scaling = args.init_scaling,
+                                                gradient_scaling = args.gradient_scaling)
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     student_model.to(device)

@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_NAME = "config.json"
 WEIGHTS_NAME = "pytorch_model.bin"
+#WEIGHTS_NAME = "FFN_GT_KD_AUG.bin"
 
 def gelu(x):
     """Implementation of the gelu activation function.

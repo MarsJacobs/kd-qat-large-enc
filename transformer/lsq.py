@@ -158,7 +158,7 @@ class quantization(nn.Module):
         return self.__str__()
 
     def __str__(self):
-        string = "quantization-{}-index({})".format(self.tag, self.index)
+        string = '{0}(LSQ_num_bits_weight={1}, init_clip_val={2})'.format(self.__class__.__name__, self.bit, self.boundary)
         if self.args is not None and self.enable == True:
             string += "-enable({})-method({})-choice-({})-half_range({})-bit({})-quant_group({})-num_levels({})-level_num({})-adaptive({})".format(
                     self.enable, self.method, self.choice, self.half_range, self.bit, self.quant_group, self.num_levels, self.level_num.item(), self.adaptive)
@@ -172,6 +172,7 @@ class quantization(nn.Module):
         self.gamma = 1.
         
         self.boundary = (self.weight.detach().abs().mean() * 2 * self.config.init_scaling) / ((self.grad_num_levels - 1) ** 0.5) # MSKIM LSQ Weight Intialization
+        # 2bit -> root(Q_P) = 1
         #logger.info('update %s_boundary %r' % (self.tag, self.boundary))
         
         self.grad_factor = {
@@ -466,12 +467,13 @@ class quantization(nn.Module):
                 
                 # Add Gradient Scaling MSKIM
                 if self.config.gradient_scaling is not None:
-                    grad_factor = self.config.gradient_scaling / (((self.grad_num_levels -1) * x.numel()) ** 0.5)
-                    #grad_factor = 1
+                    #grad_factor = self.config.gradient_scaling / (((self.grad_num_levels -1) * x.numel()) ** 0.5)
+                    grad_factor = 1
                 else:
                     grad_factor = 1
                 
                 #clip_val = dorefa.GradientScale(self.clip_val.abs(), self.grad_factor)
+                
                 clip_val = dorefa.GradientScale(self.clip_val.abs(), grad_factor)
                 c1, c2= x.shape
                 # x = x.reshape(self.quant_group, -1, kh, kw)
