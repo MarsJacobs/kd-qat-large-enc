@@ -25,7 +25,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from .configuration import BertConfig
-from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer
+from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer, ClipLinear, ClipEmbedding
 
 logger = logging.getLogger(__name__)
 

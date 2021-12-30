@@ -279,6 +279,14 @@ def main():
                         default=0.3,
                         type=float,
                         help="PACT Clip Value Weight Decay")
+    parser.add_argument("--aug_N",
+                        default=30,
+                        type=int,
+                        help="Data Augmentation N Number")
+    
+    parser.add_argument('--clip_teacher',
+                        default=False, type=str2bool,
+                        help="use FP weight clipped teacher model")
 
     args = parser.parse_args() 
     
@@ -325,8 +333,13 @@ def main():
             args.student_model = os.path.join("models", "BERT_base")
         #args.student_model = os.path.join(args.model_dir, "FFN")
     if args.teacher_model is None:
-        args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
-        #args.teacher_model = os.path.join(args.model_dir, "FFN")
+        if args.clip_teacher :
+            args.teacher_model = os.path.join("output", "cola", "quant", "FFN_clip")
+            #args.teacher_model = os.path.join(args.model_dir, "FFN")
+        else:
+            args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
+        
+        
 
     processors = {
         "cola": ColaProcessor,
@@ -405,10 +418,10 @@ def main():
     # ================================================================================ #
     if args.aug_train:
         try:
-            train_file = os.path.join(processed_data_dir,'aug_data.pkl')
+            train_file = os.path.join(processed_data_dir,f'aug_data_{args.aug_N}.pkl')
             train_features = pickle.load(open(train_file,'rb'))
         except:
-            train_examples = processor.get_aug_examples(data_dir)
+            train_examples = processor.get_aug_examples(data_dir, args.aug_N)
             train_features = convert_examples_to_features(train_examples, label_list,
                                             args.max_seq_length, tokenizer, output_mode)
             with open(train_file, 'wb') as f:
@@ -468,8 +481,15 @@ def main():
     # ================================================================================  #
     # Build Teacher Model
     # ================================================================================ # 
-    teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model)
-
+    
+    
+    # Clipped Teacher
+    if args.clip_teacher:
+        teacher_config = BertConfig.from_pretrained(args.teacher_model)
+        teacher_model = QuantBertForSequenceClassification.from_pretrained(args.teacher_model, config = teacher_config, num_labels=num_labels)
+    else:
+        teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model)
+        
     teacher_model.to(device)
     teacher_model.eval()
     if n_gpu > 1:
@@ -502,7 +522,7 @@ def main():
     # ================================================================================  #
     # Build Student Model
     # ================================================================================ #
-    student_config = BertConfig.from_pretrained(args.teacher_model, 
+    student_config = BertConfig.from_pretrained(args.student_model, 
                                                 quantize_act=args.act_quant,
                                                 weight_bits = args.weight_bits,
                                                 input_bits = args.input_bits,

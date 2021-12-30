@@ -104,6 +104,9 @@ class BertSelfAttention(nn.Module):
             self.query = ClipLinear(config.hidden_size, self.all_head_size)
             self.key = ClipLinear(config.hidden_size, self.all_head_size)
             self.value = ClipLinear(config.hidden_size, self.all_head_size)
+            # self.query = nn.Linear(config.hidden_size, self.all_head_size)
+            # self.key = nn.Linear(config.hidden_size, self.all_head_size)
+            # self.value = nn.Linear(config.hidden_size, self.all_head_size)
         else:
             self.query = nn.Linear(config.hidden_size, self.all_head_size)
             self.key = nn.Linear(config.hidden_size, self.all_head_size)
@@ -210,6 +213,7 @@ class BertSelfOutput(nn.Module):
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
         elif config.clipping:
             self.dense = ClipLinear(config.hidden_size, config.hidden_size)
+            #self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         else:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
 
@@ -262,6 +266,7 @@ class BertOutput(nn.Module):
             
         elif config.clipping:
             self.dense = ClipLinear(config.intermediate_size, config.hidden_size)
+            #self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
 
         else:
             self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
@@ -325,6 +330,7 @@ class BertPooler(nn.Module):
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
         elif config.clipping:
             self.dense = ClipLinear(config.hidden_size, config.hidden_size)
+            #self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         else:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
 
