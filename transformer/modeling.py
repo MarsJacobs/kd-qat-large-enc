@@ -101,12 +101,16 @@ class BertSelfAttention(nn.Module):
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
         
+        # Value Relation
+        attention_value = torch.matmul(value_layer, value_layer.transpose(-1,-2)) / math.sqrt(self.attention_head_size)
+        #attention_value = value_layer
+
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             attention_scores = attention_scores + attention_mask
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
-        
+        attention_prob = attention_probs
         #torch.save(attention_probs, f"FP_layer_{self.i}_attn_probs.pth")
         attention_probs = self.dropout(attention_probs)
 
@@ -114,7 +118,8 @@ class BertSelfAttention(nn.Module):
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
-        return context_layer, attention_scores
+
+        return context_layer, attention_scores, attention_prob, attention_value
 
 
 class BertSelfOutput(nn.Module):
@@ -137,9 +142,9 @@ class BertAttention(nn.Module):
         self.output = BertSelfOutput(config, i)
 
     def forward(self, input_tensor, attention_mask):
-        self_output, layer_att = self.self(input_tensor, attention_mask)
+        self_output, layer_att, layer_probs, layer_value = self.self(input_tensor, attention_mask)
         attention_output = self.output(self_output, input_tensor)
-        return attention_output, layer_att
+        return attention_output, layer_att, layer_probs, layer_value
 
 
 class BertIntermediate(nn.Module):
@@ -182,12 +187,12 @@ class BertLayer(nn.Module):
         self.output = BertOutput(config, i)
 
     def forward(self, hidden_states, attention_mask):
-        attention_output, layer_att = self.attention(
+        attention_output, layer_att, layer_probs, layer_value = self.attention(
             hidden_states, attention_mask)
         intermediate_output = self.intermediate(attention_output)
         layer_output = self.output(intermediate_output, attention_output)
 
-        return layer_output, layer_att
+        return layer_output, layer_att, layer_probs, layer_value
 
 
 class BertEncoder(nn.Module):
@@ -200,13 +205,18 @@ class BertEncoder(nn.Module):
         
         all_encoder_layers = [hidden_states]
         all_encoder_atts = []
+        all_encoder_probs = []
+        all_encoder_values = []
+
         for _, layer_module in enumerate(self.layer):
-            hidden_states, layer_att = layer_module(
+            hidden_states, layer_att, layer_probs, layer_value = layer_module(
                 hidden_states, attention_mask)
             all_encoder_layers.append(hidden_states)
             all_encoder_atts.append(layer_att)
+            all_encoder_probs.append(layer_probs)
+            all_encoder_values.append(layer_value)
 
-        return all_encoder_layers, all_encoder_atts
+        return all_encoder_layers, all_encoder_atts, all_encoder_probs, all_encoder_values
 
 
 class BertPooler(nn.Module):
@@ -356,11 +366,11 @@ class BertModel(BertPreTrainedModel):
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
         embedding_output = self.embeddings(input_ids, token_type_ids)
-        encoded_layers, attention_scores = self.encoder(embedding_output,
+        encoded_layers, attention_scores, attention_probs, attention_values = self.encoder(embedding_output,
                                                   extended_attention_mask)
 
         pooled_output = self.pooler(encoded_layers[-1])
-        return encoded_layers, attention_scores, pooled_output
+        return encoded_layers, attention_scores, attention_probs, attention_values, pooled_output
 
 class BertForSequenceClassification(BertPreTrainedModel):
     def __init__(self, config, num_labels = 2):
@@ -381,7 +391,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 token_type_ids=None,
                 attention_mask=None, 
                 labels=None):
-        encoded_layers, attention_scores, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
+        encoded_layers, attention_scores, attention_probs, attention_values, pooled_output = self.bert(input_ids, token_type_ids, attention_mask)
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
 
@@ -390,7 +400,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             return loss, attention_scores, encoded_layers
         else:
-            return logits, attention_scores, encoded_layers
+            return logits, attention_scores, encoded_layers, attention_probs, attention_values
 
 class BertForQuestionAnswering(BertPreTrainedModel):
     def __init__(self, config):

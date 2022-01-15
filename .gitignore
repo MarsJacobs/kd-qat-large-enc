@@ -5,3 +5,6 @@ output
 __pycache__
 .neptune
 .vscode
+kl_maps
+ffn_aug_maps
+ffn_kl_maps

@@ -336,7 +336,7 @@ class ClipLinear(nn.Linear):
         
         m = weight.norm(p=1).div(weight.nelement())
         
-        thres = m * 0.7
+        thres = m
         mask = (weight.abs() > thres).float()
         alpha = (mask * weight).abs().sum() / mask.sum()
         
