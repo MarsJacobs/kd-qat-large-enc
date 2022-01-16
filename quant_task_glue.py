@@ -356,6 +356,7 @@ def main():
     if args.student_model is None:
         if not args.downstream:
             args.student_model = os.path.join("output", "BERT_base",task_name.upper())
+            #args.student_model = os.path.join("models",task_name.upper())
             #args.student_model = os.path.join("models", "BERT_base")
             #args.student_model = os.path.join(args.model_dir, "FFN")
         else:
@@ -367,6 +368,7 @@ def main():
             #args.teacher_model = os.path.join(args.model_dir, "FFN")
         else:
             args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
+            #args.teacher_model = os.path.join("models",task_name.upper())
         
         
 
@@ -784,12 +786,12 @@ def main():
                     run["loss/attmap_loss_loss"].log(attmap_loss)
                     run["loss/vr_loss_loss"].log(vr_loss)
                     
-                    map_dir = os.path.join("qkv_maps", f"eval_{eval_num}")
-                    if not os.path.exists(map_dir):
-                        os.mkdir(map_dir)
-                    map_dir = os.path.join("ffn_aug_maps", f"eval_{eval_num}")
-                    if not os.path.exists(map_dir):
-                        os.mkdir(map_dir)
+                    # map_dir = os.path.join("qkv_maps", f"eval_{eval_num}")
+                    # if not os.path.exists(map_dir):
+                    #     os.mkdir(map_dir)
+                    # map_dir = os.path.join("ffn_aug_maps", f"eval_{eval_num}")
+                    # if not os.path.exists(map_dir):
+                    #     os.mkdir(map_dir)
 
                     if args.prob_log:
                         

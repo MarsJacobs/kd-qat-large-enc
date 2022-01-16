@@ -28,17 +28,17 @@ clipping=0
 
 neptune=1
 save_quantized_model=0
-aug_train=0
-prob_log=0
+aug_train=1
+prob_log=1
 attn_test=0
 
 # Distill Option
 rep_distill=1
 attn_distill=1
-attnmap_distill=0
+attnmap_distill=$3
 
 # DA Options
-aug_N=30
+aug_N=$4
 clip_teacher=0
 # ===========================================================#
 
