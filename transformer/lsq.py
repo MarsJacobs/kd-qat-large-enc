@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.utils import _quadruple
-import dorefa as dorefa
+#import dorefa as dorefa
 
 # if sys.version_info[0] == 3:
 #     #from . import alqnet as alqnet
