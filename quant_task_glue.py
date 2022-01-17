@@ -355,8 +355,8 @@ def main():
 
     if args.student_model is None:
         if not args.downstream:
-            args.student_model = os.path.join("output", "BERT_base",task_name.upper())
-            #args.student_model = os.path.join("models",task_name.upper())
+            #args.student_model = os.path.join("output", "BERT_base",task_name.upper())
+            args.student_model = os.path.join("models",task_name.upper())
             #args.student_model = os.path.join("models", "BERT_base")
             #args.student_model = os.path.join(args.model_dir, "FFN")
         else:
@@ -367,8 +367,8 @@ def main():
             args.teacher_model = os.path.join("output", "cola", "quant", "0103")
             #args.teacher_model = os.path.join(args.model_dir, "FFN")
         else:
-            args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
-            #args.teacher_model = os.path.join("models",task_name.upper())
+            #args.teacher_model = os.path.join("output", "BERT_base",task_name.upper())
+            args.teacher_model = os.path.join("models",task_name.upper())
         
         
 
