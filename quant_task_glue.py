@@ -60,7 +60,7 @@ def get_tensor_data(output_mode, features):
     return tensor_data, all_label_ids
 
 def do_eval(model, task_name, eval_dataloader,
-            device, output_mode, eval_labels, num_labels):
+            device, output_mode, eval_labels, num_labels, teacher_model=None):
     eval_loss = 0
     nb_eval_steps = 0
     preds = []
@@ -70,7 +70,13 @@ def do_eval(model, task_name, eval_dataloader,
         
         with torch.no_grad():
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch_
-            logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
+
+            # teacher attnmap test
+            if teacher_model is not None:
+                logits, _, _, teacher_probs, _ = teacher_model(input_ids, segment_ids, input_mask)
+                logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
+            else:
+                logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
 
         # create eval loss and other metric required by the task
         if output_mode == "classification":
@@ -316,7 +322,9 @@ def main():
     parser.add_argument('--value_relation',
                         default =False, type=str2bool,
                         help="attention Map Distill Option")
-
+    parser.add_argument('--teacher_attnmap',
+                        default =False, type=str2bool,
+                        help="attention Map Distill Option")
     args = parser.parse_args() 
     
     # ================================================================================  #
@@ -572,7 +580,8 @@ def main():
                                                 init_scaling = args.init_scaling,
                                                 clip_ratio = args.clip_ratio,
                                                 gradient_scaling = args.gradient_scaling,
-                                                clip_method = args.clip_method)
+                                                clip_method = args.clip_method,
+                                                teacher_attnmap = args.teacher_attnmap)
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
@@ -655,14 +664,12 @@ def main():
             rep_loss = 0.
             cls_loss = 0.
             loss = 0.
-            
-            #sent_loss_ranking = 0.
-
-            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask)
-            
+            import pdb; pdb.set_trace()
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             
+            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
+
             if args.gt_loss:
                 lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
                 loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
@@ -769,7 +776,7 @@ def main():
                 student_model.eval()
                 
                 result = do_eval(student_model, task_name, eval_dataloader,
-                                    device, output_mode, eval_labels, num_labels)
+                                    device, output_mode, eval_labels, num_labels, teacher_model=teacher_model)
                 result['global_step'] = global_step
                 result['cls_loss'] = cls_loss
                 result['att_loss'] = att_loss
@@ -893,24 +900,24 @@ def main():
                 if task_name=='cola':
                     #summaryWriter.add_scalar('mcc',result['mcc'],global_step)
                     if run is not None:
-                        run["metrics/mcc"].log(result['mcc'])
+                        run["metrics/mcc"].log(value=result['mcc'], step=global_step)
                     logger.info(f"Eval Result is {result['mcc']}")
                 elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
                     #summaryWriter.add_scalar('acc',result['acc'],global_step)
                     if run is not None:
-                        run["metrics/acc"].log(result['acc'])
+                        run["metrics/acc"].log(value=result['acc'],step=global_step)
                     logger.info(f"Eval Result is {result['acc']}")
                 elif task_name in ['mrpc','qqp']:
                     # summaryWriter.add_scalars('performance',{'acc':result['acc'],
                     #                             'f1':result['f1'],
                     #                             'acc_and_f1':result['acc_and_f1']},global_step)
                     if run is not None:
-                        run["metrics/acc_and_f1"].log(result['acc_and_f1'])
+                        run["metrics/acc_and_f1"].log(value=result['acc_and_f1'],step=global_step)
                     logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
                 else:
                     #summaryWriter.add_scalar('corr',result['corr'],global_step)
                     if run is not None:
-                        run["metrics/corr"].log(result['corr'])
+                        run["metrics/corr"].log(value=result['corr'],step=global_step)
                     logger.info(f"Eval Result is {result['corr']}")
 
                 # Save Model

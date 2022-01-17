@@ -84,7 +84,9 @@ class BertSelfAttention(nn.Module):
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        
         self.i = i
+        self.config = config
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[
