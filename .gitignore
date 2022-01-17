@@ -8,3 +8,4 @@ __pycache__
 kl_maps
 ffn_aug_maps
 ffn_kl_maps
+*.sh

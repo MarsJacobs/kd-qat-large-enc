@@ -779,12 +779,12 @@ def main():
                 # Logging
                 if run is not None:
                     
-                    run["loss/total_loss"].log(loss)
-                    run["loss/att_loss_loss"].log(att_loss)
-                    run["loss/rep_loss_loss"].log(rep_loss)
-                    run["loss/cls_loss_loss"].log(cls_loss)
-                    run["loss/attmap_loss_loss"].log(attmap_loss)
-                    run["loss/vr_loss_loss"].log(vr_loss)
+                    run["loss/total_loss"].log(value=loss, step=global_step)
+                    run["loss/att_loss_loss"].log(value=att_loss, step=global_step)
+                    run["loss/rep_loss_loss"].log(value=rep_loss, step=global_step)
+                    run["loss/cls_loss_loss"].log(value=cls_loss, step=global_step)
+                    run["loss/attmap_loss_loss"].log(value=attmap_loss, step=global_step)
+                    #run["loss/vr_loss_loss"].log(value=vr_loss, step=global_step)
                     
                     # map_dir = os.path.join("qkv_maps", f"eval_{eval_num}")
                     # if not os.path.exists(map_dir):
@@ -871,23 +871,23 @@ def main():
                             # tc_sort = teacher_prob.sort(descending=True, dim=3)[1].detach().clone().cpu()
                             # loss_hamming = hamming_distance(st_sort, tc_sort)
 
-                            run[f"attn/L{i}_KLdiv_mean"].log(kl_div_sum / 12)
+                            run[f"attn/L{i}_KLdiv_mean"].log(value=kl_div_sum / 12, step=global_step)
 
-                            run[f"attn/L{i}_st_SepProb_mean"].log(st_sep_avg_sum / 12)
-                            run[f"attn/L{i}_st_ClsProb_mean"].log(st_cls_avg_sum / 12)
-                            run[f"attn/L{i}_tc_SepProb_mean"].log(tc_sep_avg_sum / 12)
-                            run[f"attn/L{i}_tc_ClsProb_mean"].log(tc_cls_avg_sum / 12)
+                            run[f"attn/L{i}_st_SepProb_mean"].log(value=st_sep_avg_sum / 12, step=global_step)
+                            run[f"attn/L{i}_st_ClsProb_mean"].log(value=st_cls_avg_sum / 12, step=global_step)
+                            run[f"attn/L{i}_tc_SepProb_mean"].log(value=tc_sep_avg_sum / 12, step=global_step)
+                            run[f"attn/L{i}_tc_ClsProb_mean"].log(value=tc_cls_avg_sum / 12, step=global_step)
                             
-                            run[f"attn/L{i}_cover_mean"].log(cover_sum / 12)
-                            run[f"attn/L{i}_Loss_ranking"].log(Loss_ranking_sum / 12)
-                            run[f"attn/L{i}_Loss_hamming"].log(hamming_sum / 12)
+                            run[f"attn/L{i}_cover_mean"].log(value=cover_sum / 12, step=global_step)
+                            #run[f"attn/L{i}_Loss_ranking"].log(value=Loss_ranking_sum / 12, step=global_step)
+                            run[f"attn/L{i}_Loss_hamming"].log(value=hamming_sum / 12, step=global_step)
 
 
                     # for n, p in student_model.named_parameters():
                     #     if "clip_val" in n:
                     #         run[f"clip_val/{n}"].log(p)
 
-                    run["metrics/lr"].log(optimizer.get_lr()[0])
+                    run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
                     eval_num = eval_num + 1
 
                 if task_name=='cola':
