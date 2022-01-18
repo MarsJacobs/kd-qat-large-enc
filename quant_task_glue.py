@@ -391,9 +391,24 @@ def main():
                         help="PACT Clip Value Weight Decay")
 
     parser.add_argument("--attnmap_coeff",
-                        default=0.01,
+                        default=1,
                         type=float,
                         help="attnmap loss coeff")
+    
+    parser.add_argument("--cls_coeff",
+                        default=1,
+                        type=float,
+                        help="cls loss coeff")
+    
+    parser.add_argument("--att_coeff",
+                        default=1,
+                        type=float,
+                        help="att loss coeff")
+
+    parser.add_argument("--rep_coeff",
+                        default=1,
+                        type=float,
+                        help="rep loss coeff")
 
     parser.add_argument("--aug_N",
                         default=30,
@@ -501,7 +516,7 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 500 if args.aug_train else 100}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 50 if args.aug_train else 50}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":200},
@@ -726,6 +741,7 @@ def main():
                             t_total=num_train_optimization_steps)
     
     loss_mse = MSELoss()
+    loss_cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
     hamming_distance = HammingDistance()
     
     global_step = 0
@@ -765,10 +781,11 @@ def main():
             att_loss = 0.
             # MSKIM Added
             attmap_loss = 0.
-            vr_loss = 0
+            #vr_loss = 0
 
             rep_loss = 0.
             cls_loss = 0.
+            
             loss = 0.
             
             with torch.no_grad():
@@ -785,26 +802,46 @@ def main():
                     cls_loss = soft_cross_entropy(student_logits,teacher_logits)
                 elif output_mode == "regression":
                     cls_loss = loss_mse(student_logits, teacher_logits)
+            
+                cls_loss = cls_loss * args.cls_coeff
+                l_cls_loss = cls_loss.item()
+                
 
-                loss = cls_loss
-                tr_cls_loss += cls_loss.item()
-
-            if args.value_relation:
-                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):
+            # if args.value_relation:
+            #     for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):
                     
-                    kl_loss_vr = 0
+            #         kl_loss_vr = 0
                     
-                    for head in range(student_value.shape[1]):
-                        for word in range(student_value.shape[-1]):
-                            input_st = F.log_softmax(student_value[:,head,:,:], dim=-1)
-                            input_tc = F.softmax(teacher_value[:,head,:,:], dim=-1)
-                            kl_loss_vr += torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
+            #         for head in range(student_value.shape[1]):
+            #             for word in range(student_value.shape[-1]):
+            #                 input_st = F.log_softmax(student_value[:,head,:,:], dim=-1)
+            #                 input_tc = F.softmax(teacher_value[:,head,:,:], dim=-1)
+            #                 kl_loss_vr += torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
                     
-                    vr_loss += kl_loss_vr
+            #         vr_loss += kl_loss_vr
 
             if args.intermediate_distill:
                 if args.attnmap_distill or args.attn_distill:
+                                        
+                    # for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)):
+                        
+                    #     pearson_loss_tmp = 0
+                        
+                    #     for sent in range(teacher_prob.shape[0]):
+                    #         for head in range(teacher_prob.shape[1]):
+                    #             input_st = student_prob[sent, head, :seq_lengths[sent], :seq_lengths[sent]]
+                    #             input_tc = teacher_prob [sent, head, :seq_lengths[sent], :seq_lengths[sent]]
+
+                    #             #cos_loss_tmp += loss_cos(input_st, input_tc).mean(dim=0)
+                                
+                    #             pearson_loss_tmp += loss_cos(input_st - input_st.mean(dim=1), input_tc - input_tc.mean(dim=1)).sum()
+
+                                
+                        
+                    #     attmap_loss += pearson_loss_tmp
                     
+
+
                     for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):
                         
                         if args.attnmap_distill:
@@ -812,12 +849,24 @@ def main():
 
                             for sent in range(teacher_att.shape[0]):
                                 for head in range(teacher_att.shape[1]):
-                                    input_st = F.log_softmax(student_att[sent, head,:seq_lengths[0],:seq_lengths[0]], dim=-1)
-                                    input_tc = F.softmax(teacher_att[sent, head,:seq_lengths[0],:seq_lengths[0]], dim=-1)
-                                    kl_loss_tmp += torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
-                            
-                            attmap_loss += kl_loss_tmp
+                                    # input_st = F.log_softmax(student_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
+                                    # input_tc = F.softmax(teacher_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
                                     
+                                    # loss_1 = torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
+
+                                    # input_st = F.softmax(student_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
+                                    # input_tc = F.log_softmax(teacher_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
+                                    
+                                    # loss_2 = torch.nn.KLDivLoss(reduction='batchmean')(input_tc, input_st)
+                                    # kl_loss_tmp += (loss_1 + loss_2) / 2
+                                    input_st = F.log_softmax(student_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
+                                    input_tc = F.softmax(teacher_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
+                                    kl_loss_tmp += torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
+
+                            attmap_loss += kl_loss_tmp #* (i+1 / 12)
+                            
+                        
+                            
                         if args.attn_distill:
                             student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to(device),
                                                         student_att)
@@ -833,6 +882,12 @@ def main():
                                 tmp_loss = loss_mse(student_att, teacher_att)
 
                             att_loss += tmp_loss
+                    
+                    attmap_loss = args.attnmap_coeff*attmap_loss
+                    att_loss = args.att_coeff * att_loss
+
+                    l_attmap_loss = attmap_loss.item()
+                    l_att_loss = att_loss.item()
 
                 if args.rep_distill:
                     for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
@@ -847,11 +902,15 @@ def main():
                             tmp_loss = loss_mse(student_rep, teacher_rep)
 
                         rep_loss += tmp_loss
+                
+                rep_loss = args.rep_coeff * rep_loss
+                l_rep_loss = rep_loss.item()
             
-            attmap_loss = args.attnmap_coeff*attmap_loss
-            
-            loss += rep_loss + att_loss + attmap_loss + vr_loss
 
+
+            loss += cls_loss + rep_loss + att_loss + attmap_loss 
+            l_loss = loss.item()
+            
             if n_gpu > 1:
                 loss = loss.mean()
 
@@ -879,21 +938,22 @@ def main():
                 
                 result = do_eval(student_model, task_name, eval_dataloader,
                                     device, output_mode, eval_labels, num_labels, teacher_model=teacher_model)
+            
                 result['global_step'] = global_step
-                result['cls_loss'] = cls_loss
-                result['att_loss'] = att_loss
-                result['rep_loss'] = rep_loss
-                result['loss'] = loss
+                result['cls_loss'] = l_cls_loss
+                result['att_loss'] = l_att_loss
+                result['rep_loss'] = l_rep_loss
+                result['loss'] = l_loss
                 
 
                 # Logging
                 if run is not None:
-
-                    run["loss/total_loss"].log(value=loss, step=global_step)
-                    run["loss/att_loss_loss"].log(value=att_loss, step=global_step)
-                    run["loss/rep_loss_loss"].log(value=rep_loss, step=global_step)
-                    run["loss/cls_loss_loss"].log(value=cls_loss, step=global_step)
-                    run["loss/attmap_loss_loss"].log(value=attmap_loss, step=global_step)
+                    
+                    run["loss/total_loss"].log(value=l_loss, step=global_step)
+                    run["loss/att_loss_loss"].log(value=l_att_loss, step=global_step)
+                    run["loss/rep_loss_loss"].log(value=l_rep_loss, step=global_step)
+                    run["loss/cls_loss_loss"].log(value=l_cls_loss, step=global_step)
+                    run["loss/attmap_loss_loss"].log(value=l_attmap_loss, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
                     if args.prob_log:
