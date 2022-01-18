@@ -99,12 +99,10 @@ class BertSelfAttention(nn.Module):
         
 
         if config.quantize and config.qkv_q and is_q_layer:
-            # self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
-            # self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
-            #self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
-            self.query = nn.Linear(config.hidden_size, self.all_head_size)
-            self.key = nn.Linear(config.hidden_size, self.all_head_size)
-            self.value = nn.Linear(config.hidden_size, self.all_head_size)
+            self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+            self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+            self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+            
         elif config.clipping:
             self.query = ClipLinear(config.hidden_size, self.all_head_size)
             self.key = ClipLinear(config.hidden_size, self.all_head_size)
@@ -203,8 +201,8 @@ class BertSelfOutput(nn.Module):
             is_q_layer = config.layer_num > i
 
         if config.quantize and config.qkv_q and is_q_layer:
-            #self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
-            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+            self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
+            #self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         elif config.clipping:
             self.dense = ClipLinear(config.hidden_size, config.hidden_size)
             #self.dense = nn.Linear(config.hidden_size, config.hidden_size)

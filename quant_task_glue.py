@@ -299,7 +299,7 @@ def main():
                         type=float,
                         help="PACT Clip Value Weight Decay")
 
-    parser.add_argument("--attnman_coeff",
+    parser.add_argument("--attnmap_coeff",
                         default=0.01,
                         type=float,
                         help="attnmap loss coeff")
@@ -755,7 +755,7 @@ def main():
 
                         rep_loss += tmp_loss
                     
-            loss += rep_loss + att_loss + args.attnman_coeff*attmap_loss + vr_loss
+            loss += rep_loss + att_loss + args.attnmap_coeff*attmap_loss + vr_loss
 
             if n_gpu > 1:
                 loss = loss.mean()
