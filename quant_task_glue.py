@@ -755,9 +755,9 @@ def main():
 
                         rep_loss += tmp_loss
             
-            attnmap_loss = args.attnmap_coeff*attmap_loss
+            attmap_loss = args.attnmap_coeff*attmap_loss
             
-            loss += rep_loss + att_loss + attmap_loss + vr_loss
+            loss += rep_loss + 0.5*att_loss + attmap_loss + vr_loss
 
             if n_gpu > 1:
                 loss = loss.mean()
