@@ -34,6 +34,23 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format=log_format, datefmt='%m/%d %I:%M:%S %p')
 logger = logging.getLogger()
 
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -58,6 +75,80 @@ def get_tensor_data(output_mode, features):
     all_segment_ids = torch.tensor([f.segment_ids for f in features], dtype=torch.long)
     tensor_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,all_label_ids, all_seq_lengths)
     return tensor_data, all_label_ids
+
+def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, global_step):
+    
+    nb_steps = 0
+
+    kl_div_sum = [0 for i in range(12)]
+    st_sep_avg_sum = [0 for i in range(12)]; st_cls_avg_sum = [0 for i in range(12)]; tc_sep_avg_sum = [0 for i in range(12)]; tc_cls_avg_sum = [0 for i in range(12)]
+    cover_sum = [0 for i in range(12)]
+    
+    for _, batch_ in enumerate(new_eval_dataloader):
+        batch_ = tuple(t.to(device) for t in batch_)
+
+        with torch.no_grad():
+            input_ids, input_mask, segment_ids, label_id, seq_length = batch_
+
+            teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
+            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
+            
+            for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)): 
+                # Loss_ranking_sum = 0
+                # hamming_sum = 0
+                # head
+                for head in range(12):
+
+                    # Attention Map
+                    student_attn_map = student_prob[0][head][:seq_length,:seq_length]
+                    teacher_attn_map = teacher_prob[0][head][:seq_length,:seq_length]
+
+                    # KL Divergence
+                    kl_div = F.kl_div(student_attn_map.log(), teacher_attn_map, reduction='batchmean')
+                    kl_div_sum[i] += kl_div
+
+                    # Special Token Prob Mean
+                    st_sep_avg = student_attn_map[:,-1].mean()
+                    st_cls_avg = student_attn_map[:,0].mean()
+                    st_sep_avg_sum[i] += st_sep_avg
+                    st_cls_avg_sum[i] += st_cls_avg
+                    
+                    # Ground Truth
+                    tc_sep_avg = teacher_attn_map[:,-1].mean()
+                    tc_cls_avg = teacher_attn_map[:,0].mean()
+                    tc_sep_avg_sum[i] += tc_sep_avg
+                    tc_cls_avg_sum[i] += tc_cls_avg
+
+                    # Coverage Test
+                    coverage_head_sum = 0
+                    for k in range(student_attn_map.shape[0]):
+                        st_argsort = student_attn_map[k].sort(descending=True)[1]
+                        tc_argsort = teacher_attn_map[k].sort(descending=True)[1][:5] # Top-5
+                        
+                        max_idx = 0
+                        for idx in tc_argsort: # Teacher Top-5                             
+                            tmp = torch.where(st_argsort == idx)
+                            max_idx = max(tmp[0].item(), max_idx)
+                        
+                        coverage_ratio = max_idx / student_attn_map.shape[0]
+                        coverage_head_sum += coverage_ratio
+                    
+                    coverage_head = coverage_head_sum / student_attn_map.shape[0]
+                    cover_sum[i] += coverage_head
+                    
+                    nb_steps += 1
+
+    nb_steps = nb_steps / 12
+    
+    for l in range(12):
+        run[f"attn/L{l}_KLdiv_mean"].log(value=kl_div_sum[l] / nb_steps, step=global_step)
+        run[f"attn/L{l}_st_SepProb_mean"].log(value=st_sep_avg_sum[l] / nb_steps, step=global_step)
+        run[f"attn/L{l}_st_ClsProb_mean"].log(value=st_cls_avg_sum[l] / nb_steps, step=global_step)
+        run[f"attn/L{l}_tc_SepProb_mean"].log(value=tc_sep_avg_sum[l] / nb_steps, step=global_step)
+        run[f"attn/L{l}_tc_ClsProb_mean"].log(value=tc_cls_avg_sum[l] / nb_steps, step=global_step)
+        run[f"attn/L{l}_cover_mean"].log(value=cover_sum[l] / nb_steps, step=global_step)
+                            
+
 
 def do_eval(model, task_name, eval_dataloader,
             device, output_mode, eval_labels, num_labels, teacher_model=None):
@@ -410,7 +501,7 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 50 if args.aug_train else 50}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 500 if args.aug_train else 100}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":200},
@@ -500,9 +591,18 @@ def main():
         with open(dev_file, 'wb') as f:
                 pickle.dump(eval_features, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+    
     eval_data, eval_labels = get_tensor_data(output_mode, eval_features)
     eval_sampler = SequentialSampler(eval_data)
     eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.batch_size)
+
+    
+    # Eval Data Extraction for logging data (10%)
+    new_eval_features = eval_features[:int(len(eval_features)*0.1)]
+    new_eval_data, new_eval_labels = get_tensor_data(output_mode, new_eval_features)
+    new_eval_sampler = SequentialSampler(new_eval_data)
+    new_eval_dataloader = DataLoader(eval_data, sampler=new_eval_sampler, batch_size=1)
+    logger.info("  Num examples for Logging = %d", len(new_eval_features))
 
     if task_name == "mnli":
         processor = processors["mnli-mm"]()
@@ -652,7 +752,6 @@ def main():
         if "clip_val" in n:
             run[f"clip_val/{n}"].log(p)
     
-    eval_num = 0
     
     for epoch_ in range(int(num_train_epochs)):
         logger.info("****************************** %d Epoch ******************************", epoch_)
@@ -694,12 +793,6 @@ def main():
                 for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):
                     
                     kl_loss_vr = 0
-                    # for sent in range(student_value.shape[0]):
-                    #     for head in range(student_value.shape[1]):
-                    #         for word in range(student_value.shape[-1]):
-                    #             input_st = F.log_softmax(student_value[sent,head,:,:], dim=-1)
-                    #             input_tc = F.softmax(teacher_value[sent,head,:,:], dim=-1)
-                    #             kl_loss_vr += torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
                     
                     for head in range(student_value.shape[1]):
                         for word in range(student_value.shape[-1]):
@@ -757,7 +850,7 @@ def main():
             
             attmap_loss = args.attnmap_coeff*attmap_loss
             
-            loss += rep_loss + 0.5*att_loss + attmap_loss + vr_loss
+            loss += rep_loss + att_loss + attmap_loss + vr_loss
 
             if n_gpu > 1:
                 loss = loss.mean()
@@ -792,119 +885,45 @@ def main():
                 result['rep_loss'] = rep_loss
                 result['loss'] = loss
                 
+
                 # Logging
                 if run is not None:
-                    
+
                     run["loss/total_loss"].log(value=loss, step=global_step)
                     run["loss/att_loss_loss"].log(value=att_loss, step=global_step)
                     run["loss/rep_loss_loss"].log(value=rep_loss, step=global_step)
                     run["loss/cls_loss_loss"].log(value=cls_loss, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=attmap_loss, step=global_step)
-                    #run["loss/vr_loss_loss"].log(value=vr_loss, step=global_step)
-                    
-                    # map_dir = os.path.join("qkv_maps", f"eval_{eval_num}")
-                    # if not os.path.exists(map_dir):
-                    #     os.mkdir(map_dir)
-                    # map_dir = os.path.join("ffn_aug_maps", f"eval_{eval_num}")
-                    # if not os.path.exists(map_dir):
-                    #     os.mkdir(map_dir)
+                    run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
                     if args.prob_log:
+                        # logging metrics (attention device, special token probs..)
+                        logger.info(f"  {global_step} step logging begins..")
+                        do_logging(run, student_model, teacher_model, new_eval_dataloader, device, global_step)
+                        logger.info(f"  {global_step} step logging done..")
+                        # Hamming Distance
+                        # st_sort = student_prob_plt.sort(descending=True, dim=-1)[1].detach().clone().cpu()
+                        # tc_sort = teacher_prob_plt.sort(descending=True, dim=-1)[1].detach().clone().cpu()
+                        # loss_hamming = hamming_distance(st_sort, tc_sort)
                         
-                        sent_i = random.randrange(0,16)
-                        seq_length = seq_lengths[sent_i]
-                        input_id = input_ids[sent_i][:seq_length]
+                        # hamming_sum += loss_hamming
+                        # Ranking Loss
                         
-                        for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)): # i is layer number
-                            kl_div_sum = 0    
-                            max_idx_sum = 0
-                            st_sep_avg_sum = 0; st_cls_avg_sum = 0; tc_sep_avg_sum = 0; tc_cls_avg_sum = 0
-                            cover_sum = 0
-                            Loss_ranking_sum = 0
-                            hamming_sum = 0
+                        # Loss_ranking = 0
+                        # for h in range(seq_length):
+                        #     for idx in range(0, seq_length-1):
+                        #         for jdx in range(1, seq_length):
+                        #             p = (student_prob_plt[h][idx] - student_prob_plt[h][jdx])*(torch.sgn(teacher_prob_plt[h][idx] - teacher_prob_plt[h][jdx]))
+                        #             Loss_ranking += max(0,  - p.item())
+                        
+                        # Loss_ranking_sum += Loss_ranking
 
-                            for j in range(12): # j is head number
-                                # Attention Map 
-                                student_prob_plt = student_prob[sent_i][j][:seq_length,:seq_length]
-                                teacher_prob_plt = teacher_prob[sent_i][j][:seq_length,:seq_length]
-                                
-                                # KL Divergence (Student, Teacher)
-                                kl_div = F.kl_div(student_prob_plt.log(), teacher_prob_plt, reduction='batchmean')
-                                #run[f"attn/L{i}_H{j}_KLdiv"].log(kl_div)
-                                kl_div_sum += kl_div
+                        # Hamming Distance
 
-                                # Special Token Prob Mean
-                                st_sep_avg = student_prob_plt[:,-1].mean()
-                                st_cls_avg = student_prob_plt[:,0].mean()
-                                st_sep_avg_sum += st_sep_avg
-                                st_cls_avg_sum += st_cls_avg
-                                #run[f"attn/L{i}_H{j}_st_sep"].log(sep_avg)
-                                #run[f"attn/L{i}_H{j}_st_cls"].log(cls_avg)
+                        # st_sort = student_prob.sort(descending=True, dim=3)[1].detach().clone().cpu()
+                        # tc_sort = teacher_prob.sort(descending=True, dim=3)[1].detach().clone().cpu()
+                        # loss_hamming = hamming_distance(st_sort, tc_sort)
 
-                                tc_sep_avg = teacher_prob_plt[:,-1].mean()
-                                tc_cls_avg = teacher_prob_plt[:,0].mean()
-                                tc_sep_avg_sum += tc_sep_avg
-                                tc_cls_avg_sum += tc_cls_avg
-
-                                # Coverage Test
-                                coverage_head_sum = 0
-                                for k in range(student_prob_plt.shape[0]):
-                                    st_argsort = student_prob_plt[k].sort(descending=True)[1]
-                                    tc_argsort = teacher_prob_plt[k].sort(descending=True)[1][:3]
-                                    
-                                    max_idx = 0
-                                    for idx in tc_argsort: # Teacher Top-5                             
-                                        tmp = torch.where(st_argsort == idx)
-                                        max_idx = max(tmp[0].item(), max_idx)
-                                    
-                                    coverage_ratio = max_idx / student_prob_plt.shape[0]
-                                    coverage_head_sum += coverage_ratio
-                                
-                                coverage_head = coverage_head_sum / student_prob_plt.shape[0]
-                                #run[f"attn/L{i}_H{j}_cover"].log(coverage_head)
-                                cover_sum += coverage_head
-
-                                # Hamming Distance
-                                st_sort = student_prob_plt.sort(descending=True, dim=-1)[1].detach().clone().cpu()
-                                tc_sort = teacher_prob_plt.sort(descending=True, dim=-1)[1].detach().clone().cpu()
-                                loss_hamming = hamming_distance(st_sort, tc_sort)
-                                
-                                hamming_sum += loss_hamming
-                                # Ranking Loss
-                                
-                                # Loss_ranking = 0
-                                # for h in range(seq_length):
-                                #     for idx in range(0, seq_length-1):
-                                #         for jdx in range(1, seq_length):
-                                #             p = (student_prob_plt[h][idx] - student_prob_plt[h][jdx])*(torch.sgn(teacher_prob_plt[h][idx] - teacher_prob_plt[h][jdx]))
-                                #             Loss_ranking += max(0,  - p.item())
-                                
-                                # Loss_ranking_sum += Loss_ranking
-
-                            # Hamming Distance
-
-                            # st_sort = student_prob.sort(descending=True, dim=3)[1].detach().clone().cpu()
-                            # tc_sort = teacher_prob.sort(descending=True, dim=3)[1].detach().clone().cpu()
-                            # loss_hamming = hamming_distance(st_sort, tc_sort)
-
-                            run[f"attn/L{i}_KLdiv_mean"].log(value=kl_div_sum / 12, step=global_step)
-
-                            run[f"attn/L{i}_st_SepProb_mean"].log(value=st_sep_avg_sum / 12, step=global_step)
-                            run[f"attn/L{i}_st_ClsProb_mean"].log(value=st_cls_avg_sum / 12, step=global_step)
-                            run[f"attn/L{i}_tc_SepProb_mean"].log(value=tc_sep_avg_sum / 12, step=global_step)
-                            run[f"attn/L{i}_tc_ClsProb_mean"].log(value=tc_cls_avg_sum / 12, step=global_step)
-                            
-                            run[f"attn/L{i}_cover_mean"].log(value=cover_sum / 12, step=global_step)
-                            #run[f"attn/L{i}_Loss_ranking"].log(value=Loss_ranking_sum / 12, step=global_step)
-                            run[f"attn/L{i}_Loss_hamming"].log(value=hamming_sum / 12, step=global_step)
-
-
-                    # for n, p in student_model.named_parameters():
-                    #     if "clip_val" in n:
-                    #         run[f"clip_val/{n}"].log(p)
-
-                    run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
-                    eval_num = eval_num + 1
 
                 if task_name=='cola':
                     #summaryWriter.add_scalar('mcc',result['mcc'],global_step)
