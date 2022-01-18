@@ -754,8 +754,10 @@ def main():
                             tmp_loss = loss_mse(student_rep, teacher_rep)
 
                         rep_loss += tmp_loss
-                    
-            loss += rep_loss + att_loss + args.attnmap_coeff*attmap_loss + vr_loss
+            
+            attnmap_loss = args.attnmap_coeff*attmap_loss
+            
+            loss += rep_loss + att_loss + attmap_loss + vr_loss
 
             if n_gpu > 1:
                 loss = loss.mean()
