@@ -298,6 +298,12 @@ def main():
                         default=0.3,
                         type=float,
                         help="PACT Clip Value Weight Decay")
+
+    parser.add_argument("--attnman_coeff",
+                        default=0.01,
+                        type=float,
+                        help="attnmap loss coeff")
+
     parser.add_argument("--aug_N",
                         default=30,
                         type=int,
@@ -581,7 +587,8 @@ def main():
                                                 clip_ratio = args.clip_ratio,
                                                 gradient_scaling = args.gradient_scaling,
                                                 clip_method = args.clip_method,
-                                                teacher_attnmap = args.teacher_attnmap)
+                                                teacher_attnmap = args.teacher_attnmap
+                                                )
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
@@ -664,7 +671,7 @@ def main():
             rep_loss = 0.
             cls_loss = 0.
             loss = 0.
-            import pdb; pdb.set_trace()
+            
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             
@@ -748,7 +755,7 @@ def main():
 
                         rep_loss += tmp_loss
                     
-            loss += rep_loss + att_loss + attmap_loss + vr_loss
+            loss += rep_loss + att_loss + args.attnman_coeff*attmap_loss + vr_loss
 
             if n_gpu > 1:
                 loss = loss.mean()
