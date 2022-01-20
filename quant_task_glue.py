@@ -513,7 +513,7 @@ def main():
     # Logging setup
     # ================================================================================ #
     run = None
-    
+
     if args.neptune:
         import neptune.new as neptune
         run = neptune.init(project='niceball0827/' + args.task_name.upper(),
@@ -995,7 +995,7 @@ def main():
                 logger.info("{} step of {} steps".format(global_step, num_train_optimization_steps))
                 
                 if previous_best is not None:
-                    logger.info(f"{fp32_performance}\nPrevious best = {previous_best}")
+                    logger.info(f"{fp32_performance}")
                     logger.info(f"==> Previous Best = {previous_best}")
 
                 student_model.eval()
