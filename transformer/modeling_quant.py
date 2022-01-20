@@ -160,8 +160,14 @@ class BertSelfAttention(nn.Module):
         
         #torch.save(attention_probs, f"Q_layer_{self.i}_attn_probs.pth")
         if self.config.teacher_attnmap:
+            
             attention_probs = teacher_probs[self.i]
             attention_prob = attention_probs
+            # if self.i > 0:
+            #     attention_probs = teacher_probs[self.i]
+            #     attention_prob = attention_probs
+            # else:
+            #     attention_prob = attention_probs 
         else:
             attention_prob = attention_probs # for logging
         
