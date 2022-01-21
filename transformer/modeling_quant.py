@@ -99,8 +99,13 @@ class BertSelfAttention(nn.Module):
         
 
         if config.quantize and config.qkv_q and is_q_layer:
-            self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
-            self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+            if self.config.khshim_FP:
+                self.query = nn.Linear(config.hidden_size, self.all_head_size)
+                self.key = nn.Linear(config.hidden_size, self.all_head_size)
+            else:
+                self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+                self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+
             self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
             
         elif config.clipping:
@@ -133,8 +138,16 @@ class BertSelfAttention(nn.Module):
         return x.permute(0, 2, 1, 3)
 
     def forward(self, hidden_states, attention_mask, output_att=False, teacher_probs=None):
-        mixed_query_layer = self.query(hidden_states)
-        mixed_key_layer = self.key(hidden_states)
+        
+        # Stop Grad 
+        if self.config.khshim:
+            hidden_states_ = hidden_states.detach() # Grad cannot flow to input x
+            mixed_query_layer = self.query(hidden_states_)
+            mixed_key_layer = self.key(hidden_states_)
+        else:
+            mixed_query_layer = self.query(hidden_states)
+            mixed_key_layer = self.key(hidden_states)
+        
         mixed_value_layer = self.value(hidden_states)
 
         # Batch Size : 16, Max_len_seq : 64
@@ -146,8 +159,8 @@ class BertSelfAttention(nn.Module):
         value_layer = self.transpose_for_scores(mixed_value_layer)
         
         # Value Relation 
-        attention_value = torch.matmul(value_layer, value_layer.transpose(-1,-2)) / math.sqrt(self.attention_head_size)
-        #attention_value = value_layer
+        #attention_value = torch.matmul(value_layer, value_layer.transpose(-1,-2)) / math.sqrt(self.attention_head_size)
+        attention_value = value_layer
 
         if self.quantize_act:
             query_layer = self.act_quantizaer.apply(query_layer, self.clip_query, self.input_bits, True)
@@ -156,24 +169,28 @@ class BertSelfAttention(nn.Module):
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_scores = attention_scores + attention_mask
-        attention_probs = nn.Softmax(dim=-1)(attention_scores)
-        
-        #torch.save(attention_probs, f"Q_layer_{self.i}_attn_probs.pth")
+        st_attention_probs = nn.Softmax(dim=-1)(attention_scores)
+    
         if self.config.teacher_attnmap:
-            
-            attention_probs = teacher_probs[self.i]
-            attention_prob = attention_probs
-            # if self.i > 0:
-            #     attention_probs = teacher_probs[self.i]
-            #     attention_prob = attention_probs
-            # else:
-            #     attention_prob = attention_probs 
-        else:
-            attention_prob = attention_probs # for logging
-        
-        
-        attention_probs = self.dropout(attention_probs)
+            # Teacher Map Insertion
+            tc_attention_probs = teacher_probs[self.i]
+            attention_prob = st_attention_probs # attention probs to return (for append)
+            attention_probs = self.dropout(tc_attention_probs)
 
+        else:
+            attention_prob = st_attention_probs # attention probs to return (for append)
+            
+            #PARKS (Step2 Option)
+            if self.config.parks:
+                if self.training:
+                    tc_attention_probs = teacher_probs[self.i]
+                    attention_probs = self.dropout(tc_attention_probs)
+                else:
+                    import pdb; pdb.set_trace()
+                    attention_probs = self.dropout(st_attention_probs)
+            else:
+                attention_probs = self.dropout(st_attention_probs)
+        
         # quantize both attention probs and value layer for dot product
         if self.quantize_act:
             attention_probs = self.act_quantizaer.apply(attention_probs, self.clip_attn, self.input_bits, True)

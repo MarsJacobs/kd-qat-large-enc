@@ -44,7 +44,7 @@ class AverageMeter(object):
 
     def reset(self):
         self.val = 0
-        self.avg = 0
+        self.avg = 0 
         self.sum = 0
         self.count = 0
 
@@ -89,8 +89,9 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
     
     for batch_num, batch_ in enumerate(new_eval_dataloader):
         batch_ = tuple(t.to(device) for t in batch_)
-        if batch_num >= 1:
-            return
+        
+        if batch_num >= 1: # Visualize Attention Map only First Batch 
+            args.log_map = False
         
         with torch.no_grad():
             input_ids, input_mask, segment_ids, label_id, seq_length = batch_
@@ -147,8 +148,11 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
                         ax2.set_yticklabels(word_list, minor=False)
 
                         plt.xticks(rotation=45)
-
-                        plt_folder_name = os.path.join(args.exp_name, f"step_{global_step}")
+                        
+                        plt_folder_name = os.path.join("plt_storage" + "/" + args.exp_name)
+                        if not os.path.exists(plt_folder_name):
+                            os.mkdir(plt_folder_name)          
+                        plt_folder_name = os.path.join(plt_folder_name, f"step_{global_step}")
                         if not os.path.exists(plt_folder_name):
                             os.mkdir(plt_folder_name)                        
                         plt.savefig(plt_folder_name + "/" + f"L{i}_H{head}.png")
@@ -156,6 +160,7 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
                         
 
                     if args.log_metric:
+                        
                         # Attention Map
                         student_attn_map = student_prob[0][head][:seq_length,:seq_length]
                         teacher_attn_map = teacher_prob[0][head][:seq_length,:seq_length]
@@ -194,16 +199,19 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
                         cover_sum[i] += coverage_head
                         
                         nb_steps += 1
-
-                        nb_steps = nb_steps / 12
-                        
-                        for l in range(12):
-                            run[f"attn/L{l}_KLdiv_mean"].log(value=kl_div_sum[l] / nb_steps, step=global_step)
-                            run[f"attn/L{l}_st_SepProb_mean"].log(value=st_sep_avg_sum[l] / nb_steps, step=global_step)
-                            run[f"attn/L{l}_st_ClsProb_mean"].log(value=st_cls_avg_sum[l] / nb_steps, step=global_step)
-                            run[f"attn/L{l}_tc_SepProb_mean"].log(value=tc_sep_avg_sum[l] / nb_steps, step=global_step)
-                            run[f"attn/L{l}_tc_ClsProb_mean"].log(value=tc_cls_avg_sum[l] / nb_steps, step=global_step)
-                            run[f"attn/L{l}_cover_mean"].log(value=cover_sum[l] / nb_steps, step=global_step)
+    
+    if args.log_metric:
+        nb_steps = nb_steps / 12
+        
+        for l in range(12):
+            run[f"attn/L{l}_KLdiv_mean"].log(value=kl_div_sum[l] / nb_steps, step=global_step)
+            run[f"attn/L{l}_st_SepProb_mean"].log(value=st_sep_avg_sum[l] / nb_steps, step=global_step)
+            run[f"attn/L{l}_st_ClsProb_mean"].log(value=st_cls_avg_sum[l] / nb_steps, step=global_step)
+            run[f"attn/L{l}_tc_SepProb_mean"].log(value=tc_sep_avg_sum[l] / nb_steps, step=global_step)
+            run[f"attn/L{l}_tc_ClsProb_mean"].log(value=tc_cls_avg_sum[l] / nb_steps, step=global_step)
+            run[f"attn/L{l}_cover_mean"].log(value=cover_sum[l] / nb_steps, step=global_step)
+        
+    args.log_map = True
                             
 
 
@@ -339,6 +347,18 @@ def main():
 
     parser.add_argument('--act_quant',
                         default=True, type=str2bool,
+                        help="Whether to quantize activation")
+    
+    parser.add_argument('--parks',
+                        default=False, type=str2bool,
+                        help="Whether to quantize activation")
+
+    parser.add_argument('--khshim',
+                        default=False, type=str2bool,
+                        help="Whether to quantize activation")
+    
+    parser.add_argument('--khshim_FP',
+                        default=False, type=str2bool,
                         help="Whether to quantize activation")
     
     parser.add_argument('--neptune',
@@ -525,7 +545,7 @@ def main():
     # Load Directory
     # ================================================================================ #
     logger.info(f"DISTILL => rep : {args.rep_distill} | cls : {args.pred_distill} | atts : {args.attn_distill} | attmap : {args.attnmap_distill} | tc_insert : {args.teacher_attnmap} | gt_loss : {args.gt_loss}")
-    logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
+    logger.info(f"COEFF=> attnmap : {args.attnmap_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
     logger.info('The args: {}'.format(args))
     
     task_name = args.task_name.lower()
@@ -547,10 +567,11 @@ def main():
         args.student_model = os.path.join("models", "BERT_base")
     elif args.training_type == "qat_normal":
         args.student_model = os.path.join("models",task_name.upper())
+        #args.student_model = os.path.join("output", task_name, "quant", "parks_step2") # kh_step_1 | teacher_map_exp
     elif args.training_type == "qat_step1":
         args.student_model = os.path.join("models",task_name.upper())
     elif args.training_type == "qat_step2": 
-        args.student_model = os.path.join("output", task_name, "quant", "teacher_map_exp")
+        args.student_model = os.path.join("output", task_name, "quant", "shim_step_1") # kh_step_1 | teacher_map_exp 
     else:
         raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2}")
 
@@ -769,7 +790,10 @@ def main():
                                                 clip_ratio = args.clip_ratio,
                                                 gradient_scaling = args.gradient_scaling,
                                                 clip_method = args.clip_method,
-                                                teacher_attnmap = args.teacher_attnmap
+                                                teacher_attnmap = args.teacher_attnmap,
+                                                parks = args.parks,
+                                                khshim = args.khshim,
+                                                khshim_FP = args.khshim_FP
                                                 )
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
@@ -803,6 +827,7 @@ def main():
                     no_decay_list.append(p)
             else:
                 freeze_param_list.append(p)
+                #p.requires_grad = False
 
         optimizer_grouped_parameters = [
             {'params': train_param_list, 'weight_decay': 0.01},
@@ -831,7 +856,6 @@ def main():
                             lr=args.learning_rate,
                             warmup=0.1,
                             t_total=num_train_optimization_steps)
-    
     
     loss_mse = MSELoss()
     loss_cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
@@ -875,16 +899,15 @@ def main():
             loss = 0.
             
             l_attmap_loss = 0.
+            l_att_loss = 0.
             l_rep_loss = 0.
             l_cls_loss = 0.
             l_loss = 0.
-
+            
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             
             student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
-            
-            #import pdb; pdb.set_trace()
             
             if args.gt_loss:
                 lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
@@ -914,21 +937,76 @@ def main():
             #         vr_loss += kl_loss_vr
 
             if args.attnmap_distill or args.attn_distill:
-                                                    
+                
+                if args.attnmap_distill:
+
+                    BATCH_SIZE = student_probs[0].shape[0]
+                    NUM_HEADS = student_probs[0].shape[1]
+                    MAX_SEQ = student_probs[0].shape[2]
+                    
+                    mask = torch.zeros(BATCH_SIZE, NUM_HEADS, MAX_SEQ, MAX_SEQ, dtype=torch.float32)
+                    mask_seq = []
+                    
+                    for sent in range(BATCH_SIZE):
+                        s = seq_lengths[sent]
+                        mask[sent, :, :s, :s] = 1.0
+                    
+                    mask = mask.to(device)
+
+                    for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)):            
+
+                        # KLD(teacher || student)
+                        # = sum (p(t) log p(t)) - sum(p(t) log p(s))
+                        # = (-entropy) - (-cross_entropy)
+                        
+                        student = torch.clamp_min(student_prob, 1e-8)
+                        teacher = torch.clamp_min(teacher_prob, 1e-8)
+
+                        # p(t) log p(s) = negative cross entropy
+                        neg_cross_entropy = teacher * torch.log(student) * mask
+                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                        # p(t) log p(t) = negative entropy
+                        neg_entropy = teacher * torch.log(teacher) * mask
+                        neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                        neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                        kld_loss = neg_entropy - neg_cross_entropy
+                        
+                        kld_loss_sum = torch.sum(kld_loss)
+                        attmap_loss += kld_loss_sum
+
+                        # kld_loss_orig = []
+                        # for i in range(BATCH_SIZE):
+                        #     for j in range(NUM_HEADS):
+                        #         s = seq_lengths[i]
+                        #         log_teacher = torch.log(teacher_prob[i, j, :s, :s])
+                        #         log_student = torch.log(student_prob[i, j, :s, :s])
+
+                        #         # both are same
+                        #         kld = torch.nn.KLDivLoss(log_target=True, reduction="batchmean")(log_student, log_teacher)
+                        #         # kld = torch.nn.KLDivLoss(log_target=False, reduction="batchmean")(log_teacher, log_student.exp())
+                        #         kld_loss_orig.append(kld)
+
+                        # kld_loss_orig = torch.stack(kld_loss_orig)
+                        # kld_loss_orig_sum = kld_loss_orig.sum()
+                        # attmap_loss += kld_loss_orig_sum        
+
                 for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):
                     
-                    if args.attnmap_distill:
-                        kl_loss_tmp = 0
-
-                        for sent in range(teacher_att.shape[0]):
-                            for head in range(teacher_att.shape[1]):
+                    # if args.attnmap_distill:
                                 
-                                input_st = F.log_softmax(student_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
-                                input_tc = F.softmax(teacher_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
-                                kl_loss_tmp += torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
+                    #     kl_loss_tmp = 0
+
+                    #     for sent in range(teacher_att.shape[0]):
+                    #         for head in range(teacher_att.shape[1]):
+                    
+                    #             input_st = F.log_softmax(student_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
+                    #             input_tc = F.softmax(teacher_att[sent, head,:seq_lengths[sent],:seq_lengths[sent]], dim=-1)
+                    #             kl_loss_tmp += torch.nn.KLDivLoss(reduction='batchmean')(input_st, input_tc)
                         
-                        attmap_loss += kl_loss_tmp 
-                        
+                    #     attmap_loss += kl_loss_tmp 
                     
                         
                     if args.attn_distill:
@@ -968,9 +1046,9 @@ def main():
                         tmp_loss = loss_mse(student_rep, teacher_rep)
 
                     rep_loss += tmp_loss
-            
-            rep_loss = args.rep_coeff * rep_loss
-            l_rep_loss = rep_loss.item()
+
+                rep_loss = args.rep_coeff * rep_loss
+                l_rep_loss = rep_loss.item()
             
             loss += cls_loss + rep_loss + att_loss + attmap_loss 
             l_loss = loss.item()
