@@ -28,10 +28,10 @@ clipping=0
 
 parks=0
 khshim=1
-khshim_FP=1
+khshim_FP=0
 
 # Logging Option
-exp_name=shim_step_1
+exp_name=shim_step_1_clone_quant
 neptune=1
 save_quantized_model=1
 
@@ -94,4 +94,4 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
 --seed 42 \
---learning_rate ${learning_rate}
+--learning_rate ${learning_rate} --parks ${parks} --khshim ${khshim} --khshim_FP ${khshim_FP}

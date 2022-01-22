@@ -28,14 +28,15 @@ clipping=0
 
 parks=0
 khshim=0
+khshim_FP=0
 
 # Logging Option
 exp_name=gt_step_1
 neptune=1
 save_quantized_model=0
 
-prob_log=0
-log_metric=0
+prob_log=1
+log_metric=1
 log_map=0
 
 # Distill Option
@@ -49,8 +50,7 @@ value_relation=0
 teacher_attnmap=0
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
-training_type=qat_step2
-other_lr=2E-6 # for step 2
+training_type=qat_normal
 
 # Loss Coeff
 attnmap_coeff=1
@@ -63,7 +63,10 @@ aug_train=0
 aug_N=5
 clip_teacher=0
 
+# LR
 learning_rate=2e-5
+other_lr=2E-6 # for step 2
+
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 \
@@ -88,8 +91,9 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --aug_N ${aug_N} \
 --prob_log ${prob_log} \
 --clip_teacher ${clip_teacher} \
+--num_train_epochs 3 \
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
 --seed 42 \
---learning_rate ${learning_rate}
+--learning_rate ${learning_rate} --parks ${parks}

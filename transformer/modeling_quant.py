@@ -141,7 +141,8 @@ class BertSelfAttention(nn.Module):
         
         # Stop Grad 
         if self.config.khshim:
-            hidden_states_ = hidden_states.detach() # Grad cannot flow to input x
+            #hidden_states_ = hidden_states.detach() # Grad cannot flow to input x
+            hidden_states_ = hidden_states.clone().detach()
             mixed_query_layer = self.query(hidden_states_)
             mixed_key_layer = self.key(hidden_states_)
         else:
