@@ -31,12 +31,12 @@ khshim=0
 khshim_FP=0
 
 # Logging Option
-exp_name=gt_step_1
+exp_name=cola_da_20
 neptune=1
 save_quantized_model=0
 
-prob_log=1
-log_metric=1
+prob_log=0
+log_metric=0
 log_map=0
 
 # Distill Option
@@ -53,19 +53,19 @@ teacher_attnmap=0
 training_type=qat_normal
 
 # Loss Coeff
-attnmap_coeff=1
+attnmap_coeff=0
 cls_coeff=1
 att_coeff=1
 rep_coeff=1
 
 # DA Options
-aug_train=0
-aug_N=5
+aug_train=1
+aug_N=20
 clip_teacher=0
 
 # LR
-learning_rate=2e-5
-other_lr=2E-6 # for step 2
+learning_rate=2E-5
+other_lr=1E-4 # for step 2
 
 # ===========================================================#
 

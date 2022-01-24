@@ -28,10 +28,10 @@ clipping=0
 
 parks=0
 khshim=1
-khshim_FP=0
+khshim_FP=1
 
 # Logging Option
-exp_name=shim_step_1_clone_quant
+exp_name=shim_step_1_clone
 neptune=1
 save_quantized_model=1
 

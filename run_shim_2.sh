@@ -27,11 +27,11 @@ quantizer=ternary # ternary, pact, lsq
 clipping=0
 
 parks=0
-khshim=1
+khshim=0
 khshim_FP=0
 
 # Logging Option
-exp_name=gt_step_1
+exp_name=cola_twostep
 neptune=1
 save_quantized_model=0
 
@@ -53,14 +53,14 @@ teacher_attnmap=0
 training_type=qat_step2
 
 # Loss Coeff
-attnmap_coeff=1
+attnmap_coeff=$3
 cls_coeff=1
-att_coeff=1
+att_coeff=$4
 rep_coeff=1
 
 # DA Options
 aug_train=0
-aug_N=5
+aug_N=30
 clip_teacher=0
 
 # LR

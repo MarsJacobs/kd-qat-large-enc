@@ -167,6 +167,7 @@ class BertSelfAttention(nn.Module):
             query_layer = self.act_quantizaer.apply(query_layer, self.clip_query, self.input_bits, True)
             key_layer = self.act_quantizaer.apply(key_layer, self.clip_key, self.input_bits, True)
 
+        
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         attention_scores = attention_scores + attention_mask

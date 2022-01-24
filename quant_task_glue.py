@@ -79,10 +79,7 @@ def get_tensor_data(output_mode, features):
     tensor_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,all_label_ids, all_seq_lengths)
     return tensor_data, all_label_ids
 
-def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, global_step, args, vocab):
-    
-    student_model.eval()
-    teacher_model.eval()
+def do_logging(run, student_model, teacher_model, test_dataloader, device, global_step, args, vocab):
     
     nb_steps = 0
 
@@ -91,7 +88,7 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
     cover_sum = [0 for i in range(12)]
     cover_teacher_sum = [0 for i in range(12)]
     
-    for batch_num, batch_ in enumerate(new_eval_dataloader):
+    for batch_num, batch_ in enumerate(test_dataloader):
         batch_ = tuple(t.to(device) for t in batch_)
         
         if batch_num >= 1: # Visualize Attention Map only First Batch 
@@ -102,6 +99,11 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
 
             teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
+            
+            
+
+            torch.save(teacher_atts, args.exp_name+"_tc.pth")
+            torch.save(student_atts, args.exp_name+"_st.pth")
             
             for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)): 
                 # Loss_ranking_sum = 0
@@ -166,8 +168,8 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
                     if args.log_metric:
                         
                         # Attention Map
-                        student_attn_map = student_prob[0][head][:seq_length,:seq_length]
-                        teacher_attn_map = teacher_prob[0][head][:seq_length,:seq_length]
+                        student_attn_map = student_prob[0][head][:seq_length,:seq_length].clone().detach()
+                        teacher_attn_map = teacher_prob[0][head][:seq_length,:seq_length].clone().detach()
 
                         # KL Divergence
                         kl_div = F.kl_div(student_attn_map.log(), teacher_attn_map, reduction='batchmean')
@@ -190,7 +192,7 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
                         coverage_teacher_head_sum = 0
                         for k in range(student_attn_map.shape[0]):
                             st_argsort = student_attn_map[k].sort(descending=True)[1]
-                            tc_argsort = teacher_attn_map[k].sort(descending=True)[1][:args.top-k] # Top-5
+                            tc_argsort = teacher_attn_map[k].sort(descending=True)[1][:args.tc_top_k] # Top-5
                             
                             max_idx = 0
                             for idx in tc_argsort: # Teacher Top-5                             
@@ -198,7 +200,7 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
                                 max_idx = max(tmp[0].item(), max_idx)
                             
                             coverage_ratio = max_idx / student_attn_map.shape[0]
-                            coverage_teacher_ratio = (args.top-k - 1) / student_attn_map.shape[0]
+                            coverage_teacher_ratio = (args.tc_top_k - 1) / student_attn_map.shape[0]
                             coverage_head_sum += coverage_ratio
                             coverage_teacher_head_sum += coverage_teacher_ratio
                         
@@ -221,8 +223,9 @@ def do_logging(run, student_model, teacher_model, new_eval_dataloader, device, g
             run[f"attn/L{l}_tc_ClsProb_mean"].log(value=tc_cls_avg_sum[l] / nb_steps, step=global_step)
             run[f"attn/L{l}_st_cover_mean"].log(value=cover_sum[l] / nb_steps, step=global_step)
             run[f"attn/L{l}_tc_cover_mean"].log(value=cover_teacher_sum[l] / nb_steps, step=global_step)
-        
+
     args.log_map = True
+    
                             
 
 
@@ -240,10 +243,12 @@ def do_eval(model, task_name, eval_dataloader,
 
             # teacher attnmap test
             if teacher_model is not None:
-                logits, _, _, teacher_probs, _ = teacher_model(input_ids, segment_ids, input_mask)
+                logits, teacher_atts, _, teacher_probs, _ = teacher_model(input_ids, segment_ids, input_mask)
+                
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
+            
 
         # create eval loss and other metric required by the task
         if output_mode == "classification":
@@ -348,7 +353,7 @@ def main():
                         type=int,
                         help="Quantization bits for activation.")
     
-    parser.add_argument("--top-k",
+    parser.add_argument("--tc_top_k",
                         default=3,
                         type=int,
                         help="Top-K Coverage")
@@ -622,14 +627,14 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 50 if args.aug_train else 50}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 2000000 if args.aug_train else 50}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
-        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":200},
-        "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":50},
+        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":20000},
+        "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "qnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
-        "rte": {"max_seq_length": 128,"batch_size":32,"eval_step":570 if args.aug_train else 100}
+        "rte": {"max_seq_length": 128,"batch_size":32,"eval_step":100 if args.aug_train else 20}
     }
 
     acc_tasks = ["mnli", "mrpc", "sst-2", "qqp", "qnli", "rte"]
@@ -704,6 +709,15 @@ def main():
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.batch_size)
     
     try:
+        test_file = train_file = os.path.join(processed_data_dir,'test.pkl')
+        test_features = pickle.load(open(dev_file,'rb'))
+    except:
+        test_examples = processor.get_test_examples(data_dir)
+        test_features = convert_examples_to_features(test_examples, label_list, args.max_seq_length, tokenizer, output_mode)
+        with open(test_file, 'wb') as f:
+                pickle.dump(test_features, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    try:
         dev_file = train_file = os.path.join(processed_data_dir,'dev.pkl')
         eval_features = pickle.load(open(dev_file,'rb'))
     except:
@@ -718,12 +732,12 @@ def main():
     eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.batch_size)
 
     
-    # Eval Data Extraction for logging data (10%)
-    new_eval_features = eval_features[:int(len(eval_features)*0.05)]
-    new_eval_data, new_eval_labels = get_tensor_data(output_mode, new_eval_features)
-    new_eval_sampler = SequentialSampler(new_eval_data)
-    new_eval_dataloader = DataLoader(eval_data, sampler=new_eval_sampler, batch_size=1)
-    logger.info("  Num examples for Logging = %d", len(new_eval_features))
+    # Test Data Extraction for logging data (10%)
+    test_features = test_features[:int(len(test_features)*0.1)]
+    test_data, test_labels = get_tensor_data(output_mode, test_features)
+    test_sampler = SequentialSampler(test_data)
+    test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=1)
+    logger.info("  Num examples for Logging = %d", len(test_features))
 
     if task_name == "mnli":
         processor = processors["mnli-mm"]()
@@ -840,7 +854,7 @@ def main():
             if "self.query.weight" in n or "self.key.weight" in n or "self.query.bias" in n or "self.key.bias" in n:
                 if "self.query.weight" in n or "self.key.weight" in n:
                     train_param_list.append(p)
-                if "self.query.bias" in n or "self.key.bias" in n:
+                if "self.query.bias" in n or "self.key.bias" in n or "self.value.bias" in n:
                     no_decay_list.append(p)
             else:
                 freeze_param_list.append(p)
@@ -899,9 +913,8 @@ def main():
     logger.info(f"Direct Quantization Result is {result}")        
     
     if args.log_metric:
-        do_logging(run, student_model, teacher_model, new_eval_dataloader, device, global_step, args, vocab)
+        do_logging(run, student_model, teacher_model, test_dataloader, device, global_step, args, vocab)
     
-
     # ================================================================================  #
     # Training Start
     # ================================================================================ #
@@ -916,6 +929,9 @@ def main():
     l_rep_loss = AverageMeter()
     l_cls_loss = AverageMeter()
     l_loss = AverageMeter()
+
+    st_abs_mean, st_mean, st_max, st_min, st_std = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+    tc_abs_mean, tc_mean, tc_max, tc_min, tc_std = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
 
     for epoch_ in range(int(num_train_epochs)):
         logger.info("****************************** %d Epoch ******************************", epoch_)
@@ -941,17 +957,22 @@ def main():
             student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
             
             if args.gt_loss:
-                lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
-                loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
+                if output_mode == "classification":
+                    lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
+                    loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
+                elif output_mode == "regression":
+                    loss = loss_mse(student_logits, teacher_logits)
 
             if args.pred_distill:
+                
                 if output_mode == "classification":
                     cls_loss = soft_cross_entropy(student_logits,teacher_logits)
                 elif output_mode == "regression":
                     cls_loss = loss_mse(student_logits, teacher_logits)
             
-                cls_loss = cls_loss * args.cls_coeff
                 l_cls_loss.update(cls_loss.item())
+                cls_loss = cls_loss * args.cls_coeff
+                
                 
 
             # if args.value_relation:
@@ -1045,24 +1066,44 @@ def main():
                                                     student_att)
                         teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to(device),
                                                     teacher_att)
+
                         if args.kd_layer_num != -1:
                             if i == args.kd_layer_num:
                                 tmp_loss = loss_mse(student_att, teacher_att)
-                            else:
+                            else:   
                                 tmp_loss = loss_mse(student_att, teacher_att)
                                 tmp_loss = tmp_loss * 0
                         else:
                             tmp_loss = loss_mse(student_att, teacher_att)
 
                         att_loss += tmp_loss 
+
+
+                        if epoch_ == 2:
+                            tc_abs_mean.update(teacher_att.abs().mean())
+                            tc_mean.update(teacher_att.mean())
+                            tc_std.update(teacher_att.std())
+                            tc_max.update(teacher_att.max())
+                            tc_min.update(teacher_att.min())
+
+                            st_abs_mean.update(student_att.abs().mean())
+                            st_mean.update(student_att.mean())
+                            st_std.update(student_att.std())
+                            st_max.update(student_att.max())
+                            st_min.update(student_att.min())
+                            
+
+
                 
                 if args.attnmap_distill:
-                    attmap_loss = args.attnmap_coeff*attmap_loss
                     l_attmap_loss.update(attmap_loss.item())
+                    attmap_loss = args.attnmap_coeff*attmap_loss
+                    
                     
                 if args.attn_distill:
-                    att_loss = args.att_coeff * att_loss
                     l_att_loss.update(att_loss.item())
+                    att_loss = args.att_coeff * att_loss
+                    
 
             if args.rep_distill:
                 for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
@@ -1078,12 +1119,22 @@ def main():
 
                     rep_loss += tmp_loss
 
-                rep_loss = args.rep_coeff * rep_loss
                 l_rep_loss.update(rep_loss.item())
+                rep_loss = args.rep_coeff * rep_loss
+                
             
-            loss += cls_loss + rep_loss + att_loss + attmap_loss 
+            loss += cls_loss + rep_loss + attmap_loss + att_loss
             l_loss.update(loss.item())
             
+            if global_step == 0: # zero step update
+                if run is not None:           
+                    run["loss/total_loss"].log(value=l_loss.avg, step=global_step)
+                    run["loss/att_loss_loss"].log(value=l_att_loss.avg, step=global_step)
+                    run["loss/rep_loss_loss"].log(value=l_rep_loss.avg, step=global_step)
+                    run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
+                    run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
+                    run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
+
             if n_gpu > 1:
                 loss = loss.mean()
 
@@ -1096,7 +1147,16 @@ def main():
             # ================================================================================  #
             #  Evaluation
             # ================================================================================ #
-            
+            if global_step == num_train_optimization_steps-1:
+                run[f"L_{i}_attn_score_mean"].log(value = st_mean.avg, step=global_step)
+                run[f"L_{i}_attn_score_abs_mean"].log(value = st_abs_mean.avg, step=global_step)
+                run[f"L_{i}_attn_score_max"].log(value = st_max.avg, step=global_step)
+                run[f"L_{i}_attn_score_min"].log(value = st_min.avg, step=global_step)
+
+                run[f"L_{i}_tc_attn_score_mean"].log(value = tc_mean.avg, step=global_step)
+                run[f"L_{i}_tc_attn_score_abs_mean"].log(value = tc_abs_mean.avg, step=global_step)
+                run[f"L_{i}_tc_attn_score_max"].log(value = tc_max.avg, step=global_step)
+                run[f"L_{i}_tc_attn_score_min"].log(value = tc_min.avg, step=global_step)
 
             if global_step % args.eval_step == 0 or global_step == num_train_optimization_steps-1: # period or last step
                 logger.info("***** Running evaluation *****")
@@ -1129,7 +1189,9 @@ def main():
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
                     if args.prob_log:
-                        do_logging(run, student_model, teacher_model, new_eval_dataloader, device, global_step, args, vocab)
+
+                        st_model = copy.deepcopy(student_model)
+                        do_logging(run, st_model, teacher_model, test_dataloader, device, global_step, args, vocab)
                         logger.info(f"  {global_step} step logging done..")
                         
                         # Loss_ranking = 0
@@ -1145,7 +1207,6 @@ def main():
                         # st_sort = student_prob.sort(descending=True, dim=3)[1].detach().clone().cpu()
                         # tc_sort = teacher_prob.sort(descending=True, dim=3)[1].detach().clone().cpu()
                         # loss_hamming = hamming_distance(st_sort, tc_sort)
-
 
                 if task_name=='cola':
                     if run is not None:
