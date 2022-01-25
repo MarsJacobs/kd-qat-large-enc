@@ -44,7 +44,7 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 attn_distill=1
-attnmap_distill=1
+attnmap_distill=0
 
 value_relation=0
 teacher_attnmap=0
@@ -59,7 +59,7 @@ att_coeff=1
 rep_coeff=1
 
 # DA Options
-aug_train=1
+aug_train=0
 aug_N=20
 clip_teacher=0
 

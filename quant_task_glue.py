@@ -698,6 +698,7 @@ def main():
             train_examples = processor.get_train_examples(data_dir)
             train_features = convert_examples_to_features(train_examples, label_list,
                                             args.max_seq_length, tokenizer, output_mode)
+            
             with open(train_file, 'wb') as f:
                 pickle.dump(train_features, f, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -710,7 +711,7 @@ def main():
     
     try:
         test_file = train_file = os.path.join(processed_data_dir,'test.pkl')
-        test_features = pickle.load(open(dev_file,'rb'))
+        test_features = pickle.load(open(test_file,'rb'))
     except:
         test_examples = processor.get_test_examples(data_dir)
         test_features = convert_examples_to_features(test_examples, label_list, args.max_seq_length, tokenizer, output_mode)
@@ -768,8 +769,8 @@ def main():
         teacher_config = BertConfig.from_pretrained(args.teacher_model)
         teacher_model = QuantBertForSequenceClassification.from_pretrained(args.teacher_model, config = teacher_config, num_labels=num_labels)
     else:
-        teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model)
-
+        teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
+    
     teacher_model.to(device)
     teacher_model.eval()
     if n_gpu > 1:
@@ -929,16 +930,31 @@ def main():
     l_rep_loss = AverageMeter()
     l_cls_loss = AverageMeter()
     l_loss = AverageMeter()
+    
+    layer_attmap_loss = [ AverageMeter() for i in range(12) ]
+    layer_att_loss = [ AverageMeter() for i in range(12) ]
+    layer_rep_loss = [ AverageMeter() for i in range(13) ]
 
-    st_abs_mean, st_mean, st_max, st_min, st_std = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
-    tc_abs_mean, tc_mean, tc_max, tc_min, tc_std = AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter(), AverageMeter()
+    st_abs_mean = [ AverageMeter() for i in range(12) ]
+    st_mean = [ AverageMeter() for i in range(12) ]
+    st_max = [ AverageMeter() for i in range(12) ]
+    st_min = [ AverageMeter() for i in range(12) ]
+    st_std = [ AverageMeter() for i in range(12) ]
+    tc_abs_mean = [ AverageMeter() for i in range(12) ]
+    tc_mean = [ AverageMeter() for i in range(12) ]
+    tc_max = [ AverageMeter() for i in range(12) ]
+    tc_min = [ AverageMeter() for i in range(12) ]
+    tc_std = [ AverageMeter() for i in range(12) ]
 
     for epoch_ in range(int(num_train_epochs)):
         logger.info("****************************** %d Epoch ******************************", epoch_)
         nb_tr_examples, nb_tr_steps = 0, 0
 
+
         for step, batch in enumerate(train_dataloader):
-            
+
+ 
+
             student_model.train()
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
@@ -1027,6 +1043,8 @@ def main():
                         kld_loss = neg_entropy - neg_cross_entropy
                         
                         kld_loss_sum = torch.sum(kld_loss)
+
+                        layer_attmap_loss[i].update(kld_loss_sum)
                         attmap_loss += kld_loss_sum
 
                         # kld_loss_orig = []
@@ -1075,22 +1093,21 @@ def main():
                                 tmp_loss = tmp_loss * 0
                         else:
                             tmp_loss = loss_mse(student_att, teacher_att)
-
+                        
+                        layer_att_loss[i].update(tmp_loss)
                         att_loss += tmp_loss 
 
+                        tc_abs_mean[i].update(teacher_att.abs().mean().item())
+                        tc_mean[i].update(teacher_att.mean().item())
+                        tc_std[i].update(teacher_att.std().item())
+                        tc_max[i].update(teacher_att.max().item())
+                        tc_min[i].update(teacher_att.min().item())
 
-                        if epoch_ == 2:
-                            tc_abs_mean.update(teacher_att.abs().mean())
-                            tc_mean.update(teacher_att.mean())
-                            tc_std.update(teacher_att.std())
-                            tc_max.update(teacher_att.max())
-                            tc_min.update(teacher_att.min())
-
-                            st_abs_mean.update(student_att.abs().mean())
-                            st_mean.update(student_att.mean())
-                            st_std.update(student_att.std())
-                            st_max.update(student_att.max())
-                            st_min.update(student_att.min())
+                        st_abs_mean[i].update(student_att.abs().mean().item())
+                        st_mean[i].update(student_att.mean().item())
+                        st_std[i].update(student_att.std().item())
+                        st_max[i].update(student_att.max().item())
+                        st_min[i].update(student_att.min().item())
                             
 
 
@@ -1116,7 +1133,7 @@ def main():
                             tmp_loss = tmp_loss * 0
                     else:
                         tmp_loss = loss_mse(student_rep, teacher_rep)
-
+                    layer_rep_loss[i].update(tmp_loss)
                     rep_loss += tmp_loss
 
                 l_rep_loss.update(rep_loss.item())
@@ -1135,6 +1152,14 @@ def main():
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
+                    for i in range(12):
+                        
+                        run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
+                        run[f"loss/layer_{i}_rep_loss_loss"].log(value=layer_rep_loss[i].avg, step=global_step)
+                        run[f"loss/layer_{i}_attmap_loss_loss"].log(value=layer_attmap_loss[i].avg, step=global_step)
+                        
+
+
             if n_gpu > 1:
                 loss = loss.mean()
 
@@ -1147,16 +1172,6 @@ def main():
             # ================================================================================  #
             #  Evaluation
             # ================================================================================ #
-            if global_step == num_train_optimization_steps-1:
-                run[f"L_{i}_attn_score_mean"].log(value = st_mean.avg, step=global_step)
-                run[f"L_{i}_attn_score_abs_mean"].log(value = st_abs_mean.avg, step=global_step)
-                run[f"L_{i}_attn_score_max"].log(value = st_max.avg, step=global_step)
-                run[f"L_{i}_attn_score_min"].log(value = st_min.avg, step=global_step)
-
-                run[f"L_{i}_tc_attn_score_mean"].log(value = tc_mean.avg, step=global_step)
-                run[f"L_{i}_tc_attn_score_abs_mean"].log(value = tc_abs_mean.avg, step=global_step)
-                run[f"L_{i}_tc_attn_score_max"].log(value = tc_max.avg, step=global_step)
-                run[f"L_{i}_tc_attn_score_min"].log(value = tc_min.avg, step=global_step)
 
             if global_step % args.eval_step == 0 or global_step == num_train_optimization_steps-1: # period or last step
                 logger.info("***** Running evaluation *****")
@@ -1187,6 +1202,44 @@ def main():
                     run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
+
+                    st_sum_mean, st_sum_abs_mean, st_sum_max, st_sum_min, st_sum_std = 0, 0, 0, 0, 0
+                    tc_sum_mean, tc_sum_abs_mean, tc_sum_max, tc_sum_min, tc_sum_std = 0, 0, 0, 0, 0
+
+                    for i in range(12):
+
+                        run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
+                        run[f"loss/layer_{i}_rep_loss_loss"].log(value=layer_rep_loss[i].avg, step=global_step)
+                        run[f"loss/layer_{i}_attmap_loss_loss"].log(value=layer_attmap_loss[i].avg, step=global_step)
+                        
+                        run[f"L_{i}_attn_score_mean"].log(value = st_mean[i].avg, step=global_step)
+                        run[f"L_{i}_attn_score_abs_mean"].log(value = st_abs_mean[i].avg, step=global_step)
+                        run[f"L_{i}_attn_score_max"].log(value = st_max[i].avg, step=global_step)
+                        run[f"L_{i}_attn_score_min"].log(value = st_min[i].avg, step=global_step)
+                        run[f"L_{i}_attn_score_std"].log(value = st_std[i].avg, step=global_step)
+
+                        st_sum_mean += st_mean[i].avg; st_sum_abs_mean += st_abs_mean[i].avg; st_sum_max += st_max[i].avg; st_sum_min += st_min[i].avg; st_sum_std += st_std[i].avg
+                        
+                        run[f"L_{i}_tc_attn_score_mean"].log(value = tc_mean[i].avg, step=global_step)
+                        run[f"L_{i}_tc_attn_score_abs_mean"].log(value = tc_abs_mean[i].avg, step=global_step)
+                        run[f"L_{i}_tc_attn_score_max"].log(value = tc_max[i].avg, step=global_step)
+                        run[f"L_{i}_tc_attn_score_min"].log(value = tc_min[i].avg, step=global_step)
+                        run[f"L_{i}_tc_attn_score_std"].log(value = tc_std[i].avg, step=global_step)
+                        
+                        tc_sum_mean += tc_mean[i].avg; tc_sum_abs_mean += tc_abs_mean[i].avg; tc_sum_max += tc_max[i].avg; tc_sum_min += tc_min[i].avg; tc_sum_std += tc_std[i].avg
+
+                    run[f"sum_attn_score_mean"].log(value = st_sum_mean, step=global_step)
+                    run[f"sum_attn_score_abs_mean"].log(value = st_sum_abs_mean, step=global_step)
+                    run[f"sum_attn_score_max"].log(value = st_sum_max, step=global_step)
+                    run[f"sum_attn_score_min"].log(value = st_sum_min, step=global_step)
+                    run[f"sum_attn_score_std"].log(value = st_sum_std, step=global_step)
+
+                    run[f"sum_tc_attn_score_mean"].log(value = tc_sum_mean, step=global_step)
+                    run[f"sum_tc_attn_score_abs_mean"].log(value = tc_sum_abs_mean, step=global_step)
+                    run[f"sum_tc_attn_score_max"].log(value = tc_sum_max, step=global_step)
+                    run[f"sum_tc_attn_score_min"].log(value = tc_sum_min, step=global_step)
+                    run[f"sum_tc_attn_score_std"].log(value = tc_sum_std, step=global_step)
+
 
                     if args.prob_log:
 
