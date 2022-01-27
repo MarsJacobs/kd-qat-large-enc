@@ -33,7 +33,7 @@ khshim_FP=0
 
 # Logging Option
 exp_name=ternary_save
-neptune=1
+neptune=0
 save_quantized_model=0
 
 prob_log=0
@@ -45,7 +45,7 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 attn_distill=1
-attnmap_distill=$4
+attnmap_distill=1
 
 value_relation=0
 teacher_attnmap=0
@@ -65,12 +65,13 @@ aug_N=20
 clip_teacher=0
 
 # LR
+tau=$4
 learning_rate=2E-5
 other_lr=2E-5 # for step 2
 
 # ===========================================================#
 
-CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 \
+CUDA_VISIBLE_DEVICES=$1 python quant_task_mode.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 \
 --weight_bits 2 --input_bits 8 --kd_layer_num ${kd_layer_num} \
 --gpu 1 --quantize ${quantize} --act_quant ${act_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
@@ -97,4 +98,5 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
 --seed $3 \
---learning_rate ${learning_rate} --parks ${parks}
+--learning_rate ${learning_rate} --parks ${parks} \
+--tau ${tau}

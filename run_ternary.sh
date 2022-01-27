@@ -32,7 +32,7 @@ khshim=0
 khshim_FP=0
 
 # Logging Option
-exp_name=ternary_save
+exp_name=cola_da_20
 neptune=1
 save_quantized_model=0
 
@@ -45,7 +45,7 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 attn_distill=1
-attnmap_distill=$4
+attnmap_distill=0
 
 value_relation=0
 teacher_attnmap=0

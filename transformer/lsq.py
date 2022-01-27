@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.utils import _quadruple
-#import dorefa as dorefa
+from .dorefa import *
 
 # if sys.version_info[0] == 3:
 #     #from . import alqnet as alqnet
@@ -36,7 +36,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 class quantization(nn.Module):
-    def __init__(self, feature_stride=None, logger=None, weight = None, shape=[], tag='wt', config=None):
+    def __init__(self, feature_stride=None, logger=None, weight = None, shape=[], tag='wt', config=None, bit=None):
         super(quantization, self).__init__()
         
         self.args = None
@@ -60,7 +60,8 @@ class quantization(nn.Module):
         self.grad_scale = 'none' # getattr(self.args, self.tag + '_grad_scale', 'none')
         self.grad_type = 'none' # getattr(args, tag + '_grad_type', 'none')
         self.custom = 'none' # getattr(args, tag + '_custom', 'none')
-        self.bit = 2 # getattr(args, tag + '_bit', None)
+        
+        self.bit = 4 # getattr(args, tag + '_bit', None)
         self.num_levels = None # getattr(args, tag + '_level', None)
         self.half_range = None # getattr(args, tag + '_half_range', None)
         self.scale = 0.5 # getattr(args, tag + '_scale', 0.5)
@@ -201,8 +202,8 @@ class quantization(nn.Module):
             #     raise RuntimeError("Quantization-{} for linear layer not provided".format(self.tag))
             self.clip_val = nn.Parameter(torch.zeros(self.quant_group, 1, 1, 1))
             self.clip_val.data.fill_(self.boundary)
-            self.quant = dorefa.LSQ
-            self.clamp = dorefa.ClampWithScale if self.grad_type in ['STE-scale'] else torch.clamp
+            self.quant = LSQ
+            self.clamp = ClampWithScale if self.grad_type in ['STE-scale'] else torch.clamp
             assert self.half_range == False
             self.choice = 'lsq'
             # if 'symmetry' in self.args.keyword:
@@ -474,7 +475,7 @@ class quantization(nn.Module):
                 
                 #clip_val = dorefa.GradientScale(self.clip_val.abs(), self.grad_factor)
                 
-                clip_val = dorefa.GradientScale(self.clip_val.abs(), grad_factor)
+                clip_val = GradientScale(self.clip_val.abs(), grad_factor)
                 c1, c2= x.shape
                 # x = x.reshape(self.quant_group, -1, kh, kw)
                 # if 'symmetry' in self.args.keyword:
@@ -491,7 +492,7 @@ class quantization(nn.Module):
                 y = y * clip_val
                 y = y.reshape(c1, c2)
                 x = x.reshape(c1, c2)
-
+                
                 if self.adaptive_restore and self.adaptive == 'var-mean':
                     y = y * (std + __EPS__) + mean
             else:

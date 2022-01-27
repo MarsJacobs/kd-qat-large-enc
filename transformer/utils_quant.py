@@ -167,14 +167,17 @@ class TwnQuantizer(torch.autograd.Function):
 
 class QuantizeLinear(nn.Linear):
 
-    def __init__(self,  *kargs,bias=True, config = None):
+    def __init__(self,  *kargs,bias=True, config = None, map=False):
         super(QuantizeLinear, self).__init__(*kargs,bias=True)
         self.quantize_act = config.quantize_act
         self.weight_bits = config.weight_bits
         self.quantize_act = config.quantize_act
         self.mean_scale = config.mean_scale
         
+        self.map = map
+
         self.config = config
+        
         self.register_buffer('qweight', self.weight.clone().detach())
 
         self.clip_initialize()
@@ -186,7 +189,13 @@ class QuantizeLinear(nn.Linear):
 
     def clip_initialize(self):
         config = self.config
-        if self.weight_bits == 2:
+        
+        if self.map:
+            self.config.quantizer = "pact"
+        else:
+            self.config.quantizer = "ternary"
+
+        if self.weight_bits == 2 or self.weight_bits == 4:
             if self.config.quantizer == "ternary":
                 self.weight_quantizer = TwnQuantizer
             if self.config.quantizer == "pact":
@@ -202,7 +211,7 @@ class QuantizeLinear(nn.Linear):
                     init_clip_valn = self.weight.abs().mean()* -2 *config.clip_ratio
                 else:
                     raise ValueError("[MS] PACT : Choose Clip Value init method")
-                self.weight_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.weight_bits,
+                self.weight_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = 4,
                                                                          init_clip_val = init_clip_val,
                                                                          init_clip_valn = init_clip_valn,
                                                                          dequantize = True, 
@@ -217,7 +226,7 @@ class QuantizeLinear(nn.Linear):
     def forward(self, input):
         
         # quantize weight
-        if self.config.quantizer == "ternary":
+        if self.config.quantizer == "ternary" and self.map != True:
             weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)
         else:
             weight = self.weight_quantizer(self.weight, layerwise=True)
@@ -269,7 +278,7 @@ class QuantizeEmbedding(nn.Embedding):
     
     def clip_initialize(self):
         config = self.config
-        if self.weight_bits == 2:
+        if self.weight_bits == 2 or self.weight_bits == 4:
             if self.config.quantizer == "ternary":
                 self.weight_quantizer = TwnQuantizer
             if self.config.quantizer == "pact":

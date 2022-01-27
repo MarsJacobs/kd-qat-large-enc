@@ -103,8 +103,8 @@ class BertSelfAttention(nn.Module):
                 self.query = nn.Linear(config.hidden_size, self.all_head_size)
                 self.key = nn.Linear(config.hidden_size, self.all_head_size)
             else:
-                self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
-                self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
+                self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, map=self.config.map)
+                self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, map=self.config.map)
 
             self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config)
             
@@ -188,7 +188,6 @@ class BertSelfAttention(nn.Module):
                     tc_attention_probs = teacher_probs[self.i]
                     attention_probs = self.dropout(tc_attention_probs)
                 else:
-                    import pdb; pdb.set_trace()
                     attention_probs = self.dropout(st_attention_probs)
             else:
                 attention_probs = self.dropout(st_attention_probs)

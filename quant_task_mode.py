@@ -273,6 +273,7 @@ def do_eval(model, task_name, eval_dataloader,
         preds = np.argmax(preds, axis=1)
     elif output_mode == "regression":
         preds = np.squeeze(preds)
+    
     result = compute_metrics(task_name, preds, eval_labels.numpy())
     result['eval_loss'] = eval_loss
     return result
@@ -553,6 +554,12 @@ def main():
     parser.add_argument('--map',
                         default =False, type=str2bool,
                         help="Q, K Parameter Quantization 4bit PACT")
+
+    parser.add_argument("--tau",
+                        default=3.0,
+                        type=float,
+                        help="{0,1}")
+
     args = parser.parse_args() 
     
     # ================================================================================  #
@@ -570,9 +577,6 @@ def main():
     # ================================================================================  #
     # Load Directory
     # ================================================================================ #
-    logger.info(f"DISTILL => rep : {args.rep_distill} | cls : {args.pred_distill} | atts : {args.attn_distill} | attmap : {args.attnmap_distill} | tc_insert : {args.teacher_attnmap} | gt_loss : {args.gt_loss}")
-    logger.info(f"COEFF=> attnmap : {args.attnmap_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
-    logger.info('The args: {}'.format(args))
     
     task_name = args.task_name.lower()
     data_dir = os.path.join(args.data_dir,task_name.upper())
@@ -587,30 +591,9 @@ def main():
 # ================================================================================  #
 # Load Pths
 # ================================================================================ #
-    # Student Model Pretrained FIle    
-    if args.training_type == "downstream":
-        args.student_model = os.path.join("models", "BERT_base")
-    elif args.training_type == "qat_normal":
-        #args.student_model = os.path.join("output", task_name, "quant", "parks_step_1_att_FP")
-        args.student_model = os.path.join("models",task_name.upper())
-        #args.student_model = os.path.join("output", task_name, "quant", "parks_step2") # kh_step_1 | teacher_map_exp
-    elif args.training_type == "qat_step1":
-        args.student_model = os.path.join("models",task_name.upper())
-    elif args.training_type == "qat_step2": 
-        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl") # shim_step_1 | shim_step_1_quant | teacher_map_exp 
-    elif args.training_type == "qat_step3":
-        args.student_model = os.path.join("output", task_name, "quant", "step2_pact_4bit")
-    elif args.training_type == "gradual":
-        args.student_model = os.path.join("output", task_name, "quant", "2SB_4bit_save") 
-
-    else:
-        raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2}")
-
-    # Teacher Model Pretrained FIle
-    if args.clip_teacher :
-        args.teacher_model = os.path.join("output", "cola", "quant", "0103")
-    else:    
-        args.teacher_model = os.path.join("models",task_name.upper())
+    # Student Model Pretrained FIle    elif args.training_type == "gradual":
+    args.student_model = os.path.join("/root/workspace/git/TernaryBERT/mode_pths/", task_name+"_"+ str(args.tau) + "-1sb_" + str(1.0-args.tau) + "-2sb")
+    
     
     processors = {
         "cola": ColaProcessor,
@@ -714,8 +697,9 @@ def main():
     num_train_epochs = args.num_train_epochs if not args.aug_train else 1
     num_train_optimization_steps = math.ceil(len(train_features) / args.batch_size) * num_train_epochs
     
-    train_data, _ = get_tensor_data(output_mode, train_features)
-    train_sampler = RandomSampler(train_data)
+    train_data, train_labels = get_tensor_data(output_mode, train_features)
+
+    train_sampler = SequentialSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.batch_size)
     
     try:
@@ -747,7 +731,6 @@ def main():
     test_data, test_labels = get_tensor_data(output_mode, test_features)
     test_sampler = SequentialSampler(test_data)
     test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=1)
-    logger.info("  Num examples for Logging = %d", len(test_features))
 
     if task_name == "mnli":
         processor = processors["mnli-mm"]()
@@ -774,40 +757,40 @@ def main():
     # ================================================================================ # 
 
     # Clipped Teacher
-    if args.clip_teacher:
-        teacher_config = BertConfig.from_pretrained(args.teacher_model)
-        teacher_model = QuantBertForSequenceClassification.from_pretrained(args.teacher_model, config = teacher_config, num_labels=num_labels)
-    else:
-        teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
+    # if args.clip_teacher:
+    #     teacher_config = BertConfig.from_pretrained(args.teacher_model)
+    #     teacher_model = QuantBertForSequenceClassification.from_pretrained(args.teacher_model, config = teacher_config, num_labels=num_labels)
+    # else:
+    #     teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
     
-    teacher_model.to(device)
-    teacher_model.eval()
-    if n_gpu > 1:
-        teacher_model = torch.nn.DataParallel(teacher_model, device_ids=range(n_gpu))
+    # teacher_model.to(device)
+    # teacher_model.eval()
+    # if n_gpu > 1:
+    #     teacher_model = torch.nn.DataParallel(teacher_model, device_ids=range(n_gpu))
     
-    result = do_eval(teacher_model, task_name, eval_dataloader,
-                    device, output_mode, eval_labels, num_labels)
-    logger.info(result)
+    # result = do_eval(teacher_model, task_name, eval_dataloader,
+    #                 device, output_mode, eval_labels, num_labels)
+    # logger.info(result)
     
     # ================================================================================  #
     # Save Teacher Model Peroformance for KD Training
     # ================================================================================ #
-    if task_name in acc_tasks:
-        if task_name in ['sst-2','mnli','qnli','rte']:
-            fp32_performance = f"acc:{result['acc']}"
-        elif task_name in ['mrpc','qqp']:
-            fp32_performance = f"f1/acc:{result['f1']}/{result['acc']}"
-    if task_name in corr_tasks:
-        fp32_performance = f"pearson/spearmanr:{result['pearson']}/{result['spearmanr']}"
+    # if task_name in acc_tasks:
+    #     if task_name in ['sst-2','mnli','qnli','rte']:
+    #         fp32_performance = f"acc:{result['acc']}"
+    #     elif task_name in ['mrpc','qqp']:
+    #         fp32_performance = f"f1/acc:{result['f1']}/{result['acc']}"
+    # if task_name in corr_tasks:
+    #     fp32_performance = f"pearson/spearmanr:{result['pearson']}/{result['spearmanr']}"
 
-    if task_name in mcc_tasks:
-        fp32_performance = f"mcc:{result['mcc']}"
+    # if task_name in mcc_tasks:
+    #     fp32_performance = f"mcc:{result['mcc']}"
 
-    if task_name == "mnli":
-        result = do_eval(teacher_model, 'mnli-mm', mm_eval_dataloader,
-                            device, output_mode, mm_eval_labels, num_labels)
-        fp32_performance += f"  mm-acc:{result['acc']}"
-    fp32_performance = task_name +' fp32   ' + fp32_performance
+    # if task_name == "mnli":
+    #     result = do_eval(teacher_model, 'mnli-mm', mm_eval_dataloader,
+    #                         device, output_mode, mm_eval_labels, num_labels)
+    #     fp32_performance += f"  mm-acc:{result['acc']}"
+    # fp32_performance = task_name +' fp32   ' + fp32_performance
     
     # ================================================================================  #
     # Build Student Model
@@ -838,15 +821,8 @@ def main():
                                                 map=args.map
                                                 )
     
-    student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
-    for name, module in student_model.named_modules():
-        if hasattr(module,'weight_quantizer'):
-            try:
-                module.clip_initialize()
-            except:
-                import pdb; pdb.set_trace()
-            #print(f"{name[13:]} {(module.weight.std()*3 / module.weight.max()).item():.2f} {(module.weight.std()*sent_i / module.weight.min()).item():.2f}")
+    student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
             
     student_model.to(device)
     
@@ -940,28 +916,22 @@ def main():
     # ================================================================================  #
     # Quantization Effect Check
     # ================================================================================ #
+    
+    student_model.eval()
+    
+    result = do_eval(student_model, task_name, train_dataloader,
+                                    device, output_mode, train_labels, num_labels, teacher_model=None)
+    print(f"Direct Quantization Result is {result}")        
+    print(f"{args.tau} : {result['eval_loss']}")
+    return 0
 
-    # logger.info("************** Quantization Effect Check **************")
-    # logger.info("{} step of {} steps".format(global_step, num_train_optimization_steps))
-    
-    # student_model.eval()
-    
-    # result = do_eval(student_model, task_name, eval_dataloader,
-    #                                 device, output_mode, eval_labels, num_labels, teacher_model=teacher_model)
-    # logger.info(f"Direct Quantization Result is {result}")        
-    
-    # if args.log_metric:
-    #     do_logging(run, student_model, teacher_model, test_dataloader, device, global_step, args, vocab)
+    if args.log_metric:
+        do_logging(run, student_model, teacher_model, test_dataloader, device, global_step, args, vocab)
     
     # ================================================================================  #
     # Training Start
     # ================================================================================ #
 
-    logger.info("***** Running training *****")
-    logger.info("  Num examples = %d", len(train_features))
-    logger.info("  Batch size = %d", args.batch_size)
-    logger.info("  Num steps = %d", num_train_optimization_steps)
-    
     l_gt_loss = AverageMeter()
     l_attmap_loss = AverageMeter()
     l_att_loss = AverageMeter()

@@ -21,6 +21,7 @@ clip_method=std
 clip_ratio=1 
 clip_wd=0.5
 lr_scaling=10
+map=0
 
 #===========================================================#
 quantizer=ternary # ternary, pact, lsq
@@ -31,11 +32,11 @@ khshim=1
 khshim_FP=1
 
 # Logging Option
-exp_name=shim_step_1_clone
+exp_name=step_1_mse_kl
 neptune=1
 save_quantized_model=1
 
-prob_log=0 
+prob_log=0
 log_metric=0
 log_map=0
 
@@ -51,7 +52,6 @@ teacher_attnmap=1
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
 training_type=qat_step1
-other_lr=0.0001 # for step 2
 
 # Loss Coeff
 attnmap_coeff=1
@@ -65,6 +65,7 @@ aug_N=5
 clip_teacher=0
 
 learning_rate=2E-5
+other_lr=2E-5
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 \
@@ -93,5 +94,5 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
---seed 42 \
+--seed 126 \
 --learning_rate ${learning_rate} --parks ${parks} --khshim ${khshim} --khshim_FP ${khshim_FP}
