@@ -26,11 +26,11 @@ Proposed SARQ method consists of Two Steps. (See Figure for Two Step SARQ)
 
 You can easily try SARQ two step Training using bash scripts.
 ```
-# For SARQ Two Step Training 
+# For SARQ Two Step Training (w/o DA)
 bash run_SARQ_two_step.sh {GPU Num} {GLUE Task} # bash run_SARQ_two_step.sh 0 sts-b
 
-# For SARQ 1 Step Training
-bash run_SARQ_1step.sh {GPU Num} {GLUE Task} # bash run_SARQ-1step.sh 0 sts-b
+# For SARQ 1 Step Training (w/o DA)
+bash run_SARQ_1step.sh {GPU Num} {GLUE Task} {DA option} {DA N param} # bash run_SARQ-1step.sh 0 sts-b 0 0
 
 # For TernaryBERT Training for comparison
 bash run_glue.sh {GPU Num} {GLUE Task} # bash run_glue.sh 0 sts-b
