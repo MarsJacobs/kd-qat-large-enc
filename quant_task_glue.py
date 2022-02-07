@@ -553,9 +553,12 @@ def main():
     # Use Neptune for logging
     if args.neptune:
         import neptune.new as neptune
-        run = neptune.init(project='Neptune_ID/' + args.task_name.upper(),
-                    api_token='Neptune_API_Token')
-        
+        # run = neptune.init(project='Neptune_ID/' + args.task_name.upper(),
+        #             api_token='Neptune_API_Token')
+        run = neptune.init(project='niceball0827/' + args.task_name.upper(),
+                    api_token='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLC\
+                    JhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI0YjM\
+                    0ZTYwMi1kNjQwLTQ4NGYtOTYxMy03Mjc5ZmVkMzY2YTgifQ==')
 
     # ================================================================================  #
     # Load Directory
