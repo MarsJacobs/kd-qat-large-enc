@@ -1,7 +1,9 @@
-boto3
+matplotlib
 requests
 scipy
 future
 Pillow
-tensorflow
-torch==1.7.0
+torch
+numpy
+copy
+collections
