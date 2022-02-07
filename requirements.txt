@@ -1,9 +1,11 @@
 matplotlib
 requests
 scipy
+scikit-learn
 future
 Pillow
 torch
 numpy
-copy
-collections
+neptune-client
+tensorboard
+torchmetrics
