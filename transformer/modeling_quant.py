@@ -52,7 +52,6 @@ class BertEmbeddings(nn.Module):
             self.word_embeddings = QuantizeEmbedding(config.vocab_size, config.hidden_size, padding_idx = 0,config=config)
         elif config.clipping:
             self.word_embeddings = ClipEmbedding(config.vocab_size, config.hidden_size)
-            #self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         else:
             self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         
@@ -99,7 +98,7 @@ class BertSelfAttention(nn.Module):
         
 
         if config.quantize and config.qkv_q and is_q_layer:
-            if self.config.khshim_FP:
+            if self.config.qk_FP:
                 self.query = nn.Linear(config.hidden_size, self.all_head_size)
                 self.key = nn.Linear(config.hidden_size, self.all_head_size)
             else:
@@ -112,9 +111,7 @@ class BertSelfAttention(nn.Module):
             self.query = ClipLinear(config.hidden_size, self.all_head_size)
             self.key = ClipLinear(config.hidden_size, self.all_head_size)
             self.value = ClipLinear(config.hidden_size, self.all_head_size)
-            # self.query = nn.Linear(config.hidden_size, self.all_head_size)
-            # self.key = nn.Linear(config.hidden_size, self.all_head_size)
-            # self.value = nn.Linear(config.hidden_size, self.all_head_size)
+
         else:
             self.query = nn.Linear(config.hidden_size, self.all_head_size)
             self.key = nn.Linear(config.hidden_size, self.all_head_size)
@@ -140,8 +137,7 @@ class BertSelfAttention(nn.Module):
     def forward(self, hidden_states, attention_mask, output_att=False, teacher_probs=None):
         
         # Stop Grad 
-        if self.config.khshim:
-            #hidden_states_ = hidden_states.detach() # Grad cannot flow to input x
+        if self.config.stop_grad:
             hidden_states_ = hidden_states.clone().detach()
             mixed_query_layer = self.query(hidden_states_)
             mixed_key_layer = self.key(hidden_states_)
@@ -160,7 +156,6 @@ class BertSelfAttention(nn.Module):
         value_layer = self.transpose_for_scores(mixed_value_layer)
         
         # Value Relation 
-        #attention_value = torch.matmul(value_layer, value_layer.transpose(-1,-2)) / math.sqrt(self.attention_head_size)
         attention_value = value_layer
 
         if self.quantize_act:
@@ -182,7 +177,7 @@ class BertSelfAttention(nn.Module):
         else:
             attention_prob = st_attention_probs # attention probs to return (for append)
             
-            #PARKS (Step2 Option)
+            # EXP : PARKS (Step2 Option)
             if self.config.parks:
                 if self.training:
                     tc_attention_probs = teacher_probs[self.i]
@@ -202,7 +197,6 @@ class BertSelfAttention(nn.Module):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
         return context_layer, attention_scores, attention_prob, attention_value
-
 
 class BertAttention(nn.Module):
     def __init__(self, config, i):
@@ -226,10 +220,10 @@ class BertSelfOutput(nn.Module):
 
         if config.quantize and config.qkv_q and is_q_layer:
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config)
-            #self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+            
         elif config.clipping:
             self.dense = ClipLinear(config.hidden_size, config.hidden_size)
-            #self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+            
         else:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
 
@@ -282,8 +276,6 @@ class BertOutput(nn.Module):
             
         elif config.clipping:
             self.dense = ClipLinear(config.intermediate_size, config.hidden_size)
-            #self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-
         else:
             self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
             
@@ -292,7 +284,6 @@ class BertOutput(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
-        #import pdb; pdb.set_trace()
         #torch.save(hidden_states, f"Q_layer_{self.i}_ffn2_input.pt")
         hidden_states = self.dense(hidden_states)
         #torch.save(hidden_states, f"Q_layer_{self.i}_ffn2_output.pt")

@@ -199,7 +199,6 @@ class QuantizeLinear(nn.Linear):
             if self.config.quantizer == "ternary":
                 self.weight_quantizer = TwnQuantizer
             if self.config.quantizer == "pact":
-                
                 if config.clip_method == "minmax":
                     init_clip_val = self.weight.max() * config.clip_ratio
                     init_clip_valn = self.weight.min() * config.clip_ratio
@@ -211,6 +210,7 @@ class QuantizeLinear(nn.Linear):
                     init_clip_valn = self.weight.abs().mean()* -2 *config.clip_ratio
                 else:
                     raise ValueError("[MS] PACT : Choose Clip Value init method")
+                # EXP : Gradual Quantization 4bit Setting (on Going)
                 self.weight_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = 4,
                                                                          init_clip_val = init_clip_val,
                                                                          init_clip_valn = init_clip_valn,

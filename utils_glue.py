@@ -288,9 +288,9 @@ class StsbProcessor(DataProcessor):
         return self._create_examples(
             self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
 
-    def get_aug_examples(self, data_dir):
+    def get_aug_examples(self, data_dir, aug_N):
         return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train_aug.tsv")), "aug")
+            self._read_tsv(os.path.join(data_dir, f"train_aug_{aug_N}.tsv")), "aug")
 
     def get_labels(self):
         """See base class."""

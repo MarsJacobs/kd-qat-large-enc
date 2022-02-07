@@ -45,7 +45,7 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 attn_distill=1
-attnmap_distill=$4
+attnmap_distill=0
 
 value_relation=0
 teacher_attnmap=0
@@ -54,15 +54,14 @@ teacher_attnmap=0
 training_type=qat_normal
 
 # Loss Coeff
-attnmap_coeff=0.01
+attnmap_coeff=1
 cls_coeff=1
 att_coeff=1
 rep_coeff=1
 
 # DA Options
 aug_train=0
-aug_N=20
-clip_teacher=0
+aug_N=30
 
 # LR
 learning_rate=2E-5
@@ -91,10 +90,9 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --neptune ${neptune} \
 --aug_N ${aug_N} \
 --prob_log ${prob_log} \
---clip_teacher ${clip_teacher} \
---num_train_epochs 4 \
+--num_train_epochs 3 \
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
---seed $3 \
+--seed 42 \
 --learning_rate ${learning_rate} --parks ${parks}

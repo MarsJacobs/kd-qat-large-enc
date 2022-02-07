@@ -5,7 +5,7 @@ q_qkv=1
 q_ffn_1=1
 q_ffn_2=1
 q_emb=1
-q_cls=1 
+q_cls=1
 layer_num=-1
 
 # KD & Ternary Option
@@ -28,30 +28,33 @@ quantizer=ternary # ternary, pact, lsq
 clipping=0
 
 parks=0
-khshim=0
-khshim_FP=0
+stop_grad=1
+qk_FP=1
 
 # Logging Option
-exp_name=cola_step_3
+exp_name=step_1_mse_kl
 neptune=1
-save_quantized_model=0
+save_quantized_model=1
 
 prob_log=0
 log_metric=0
 log_map=0
 
 # Distill Option
-gt_loss=0
+gt_loss=1
 pred_distill=1
 rep_distill=1
 attn_distill=1
 attnmap_distill=1
 
+# deprecated
 value_relation=0
-teacher_attnmap=0
 
-# Training Type (downstream, qat_normal, qat_step1, qat_step2, qat_step3)
-training_type=qat_step3
+# Teacher Intervention (TI)
+teacher_attnmap=1
+
+# Training Type (downstream, qat_normal, qat_step1, qat_step2)
+training_type=qat_step1
 
 # Loss Coeff
 attnmap_coeff=0.01
@@ -60,11 +63,9 @@ att_coeff=1
 rep_coeff=1
 
 # DA Options
-aug_train=1
-aug_N=15
-clip_teacher=0
+aug_train=0
+aug_N=5
 
-# LR
 learning_rate=2E-5
 other_lr=2E-5
 # ===========================================================#
@@ -90,10 +91,9 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --neptune ${neptune} \
 --aug_N ${aug_N} \
 --prob_log ${prob_log} \
---clip_teacher ${clip_teacher} \
---num_train_epochs 3 \
+--num_train_epochs 1 \
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
---seed 126 \
---learning_rate ${learning_rate} --parks ${parks} --khshim ${khshim} --khshim_FP ${khshim_FP}
+--seed 42 \
+--learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}
