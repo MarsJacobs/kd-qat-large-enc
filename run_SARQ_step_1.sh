@@ -33,7 +33,7 @@ qk_FP=1
 
 # Logging Option
 exp_name=step_1_mse_kl
-neptune=1
+neptune=0
 save_quantized_model=1
 
 prob_log=0
