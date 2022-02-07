@@ -244,7 +244,6 @@ def do_eval(model, task_name, eval_dataloader,
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
             
-
         # create eval loss and other metric required by the task
         if output_mode == "classification":
             loss_fct = CrossEntropyLoss()
@@ -762,7 +761,6 @@ def main():
     # Build Teacher Model
     # ================================================================================ # 
 
-    # Clipped Teacher
     teacher_model = BertForSequenceClassification.from_pretrained(args.teacher_model, num_labels=num_labels)
     
     teacher_model.to(device)
