@@ -896,7 +896,7 @@ def do_eval(args,model, dataloader,features,examples,device,dev_dataset):
         batch_ = tuple(t.to(device) for t in batch_)
         input_ids, input_mask, segment_ids, example_indices = batch_
         with torch.no_grad():
-            (batch_start_logits, batch_end_logits),_,_ = model(input_ids, segment_ids, input_mask)
+            (batch_start_logits, batch_end_logits),_,_,_,_ = model(input_ids, segment_ids, input_mask)
         for i, example_index in enumerate(example_indices):
             start_logits = batch_start_logits[i].detach().cpu().tolist()
             end_logits = batch_end_logits[i].detach().cpu().tolist()

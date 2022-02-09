@@ -419,7 +419,7 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         start_positions=None,
         end_positions=None
     ):
-        sequence_output, att_output, pooled_output = self.bert(
+        sequence_output, att_output, attention_probs, attention_values, pooled_output = self.bert(
             input_ids,token_type_ids,attention_mask)
 
         last_sequence_output = sequence_output[-1]
@@ -447,4 +447,4 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             total_loss = (start_loss + end_loss) / 2
             return total_loss, att_output, sequence_output
 
-        return logits, att_output, sequence_output
+        return logits, att_output, sequence_output, attention_probs, attention_values

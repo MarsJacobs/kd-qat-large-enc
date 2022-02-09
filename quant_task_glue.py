@@ -243,7 +243,7 @@ def do_eval(model, task_name, eval_dataloader,
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
-            
+        
         # create eval loss and other metric required by the task
         if output_mode == "classification":
             loss_fct = CrossEntropyLoss()
@@ -625,7 +625,7 @@ def main():
 
     default_params = {
         "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 50}, # No Aug : 50 Aug : 400
-        "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
+        "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":8000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":100},
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
