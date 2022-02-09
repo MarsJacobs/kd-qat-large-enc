@@ -8,6 +8,7 @@ import sys
 import pickle
 import copy
 
+import math
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler,TensorDataset
@@ -142,7 +143,7 @@ def main():
                         help="Total number of training epochs to perform.")
     parser.add_argument('--eval_step', 
                         type=int, 
-                        default=3000,
+                        default=200,
                         help="Evaluate every X training steps")
 
     parser.add_argument("--task_name",
@@ -392,16 +393,27 @@ def main():
     # ================================================================================  #
     # Load Pths
     # ================================================================================ #
-    if args.teacher_model is None:
-        if args.version_2_with_negative:
-            args.teacher_model = os.path.join("models", "squadv2.0")
-        else:
-            args.teacher_model = os.path.join("models", "squadv1.1")
-    if args.student_model is None:
-        if args.version_2_with_negative:
+
+    if args.version_2_with_negative:
+        args.teacher_model = os.path.join("models", "squadv2.0")
+    else:
+        args.teacher_model = os.path.join("models", "squadv1.1")
+    
+    
+    if args.version_2_with_negative:
+        if args.training_type == "qat_normal" or args.training_type == "qat_step1":
             args.student_model = os.path.join("models", "squadv2.0")
+        elif args.training_type == "qat_step2":
+            args.student_model = os.path.join("output", "squadv2", "quant", "step_1_mse_kl") 
         else:
+            raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2}")
+    else:
+        if args.training_type == "qat_normal" or args.training_type == "qat_step1":
             args.student_model = os.path.join("models", "squadv1.1")
+        elif args.training_type == "qat_step2":
+            args.student_model = os.path.join("output", "squadv1", "quant", "step_1_mse_kl")
+        else:
+            raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2}")
 
     # ================================================================================  #
     # prepare devices & seed
@@ -450,7 +462,7 @@ def main():
         with open(train_file, 'wb') as f:
                 pickle.dump(train_features, f, protocol=pickle.HIGHEST_PROTOCOL)
         
-    num_train_optimization_steps = int(
+    num_train_optimization_steps = math.ceil(
         len(train_features) / args.batch_size) * args.num_train_epochs
 
     logger.info("***** Running training *****")
@@ -656,18 +668,25 @@ def main():
         for step, batch in enumerate(train_dataloader):
             student_model.train()
             batch = tuple(t.to(args.device) for t in batch)
-
+            
             input_ids, input_mask, segment_ids, start_positions, end_positions = batch
             
+            # By Summing input mask, We can get Sequence Length
+            seq_lengths = []
+            for b in range(input_mask.shape[0]):
+                seq_lengths.append(input_mask[b].sum().item())
+            
+            seq_lengths = torch.Tensor(seq_lengths).to(args.device)
             att_loss = 0.
             attmap_loss = 0.
             rep_loss = 0.
             cls_loss = 0.
             loss = 0.
 
-            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids,segment_ids,input_mask)
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
+
+            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids,segment_ids,input_mask, teacher_probs=teacher_probs)
 
             if args.pred_distill:
                 soft_start_ce_loss = soft_cross_entropy(student_logits[0], teacher_logits[0])
@@ -684,10 +703,9 @@ def main():
                 MAX_SEQ = student_probs[0].shape[2]
                 
                 mask = torch.zeros(BATCH_SIZE, NUM_HEADS, MAX_SEQ, MAX_SEQ, dtype=torch.float32)
-                mask_seq = []
                 
                 for sent in range(BATCH_SIZE):
-                    s = seq_lengths[sent]
+                    s = int(seq_lengths[sent])
                     mask[sent, :, :s, :s] = 1.0
                 
                 mask = mask.to(args.device)
@@ -809,7 +827,7 @@ def main():
                     logger.info(f"Previous best = {previous_best}")
 
                 student_model.eval()
-                result = do_eval(args,student_model, eval_dataloader,eval_features,eval_examples,args.device, dev_dataset)
+                result = do_eval(args,student_model, eval_dataloader,eval_features,eval_examples,args.device, dev_dataset, teacher_model=teacher_model)
                 em,f1 = result['exact_match'],result['f1']
                 logger.info(f'FP {fp_em}/{fp_f1}')
                 logger.info(f'{em}/{f1}')
@@ -854,6 +872,11 @@ def main():
                     output_quant_dir = os.path.join(args.output_dir, 'quant')
                     if not os.path.exists(output_quant_dir):
                         os.makedirs(output_quant_dir)
+                    
+                    output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
+                    if not os.path.exists(output_quant_dir):
+                        os.makedirs(output_quant_dir)
+                        
                     model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
                     quant_model = copy.deepcopy(model_to_save)
                     for name, module in quant_model.named_modules():

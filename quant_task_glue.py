@@ -1006,7 +1006,6 @@ def main():
 
                     #kld_loss_sum = loss_mse(student, teacher)
                     #kld_loss_sum = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
-                    
                     # p(t) log p(s) = negative cross entropy
                     neg_cross_entropy = teacher * torch.log(student) * mask
                     neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
@@ -1189,7 +1188,7 @@ def main():
                     # Test mnli-mm
                     if task_name == "mnli":
                         result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
-                                            device, output_mode, mm_eval_labels, num_labels)
+                                            device, output_mode, mm_eval_labels, num_labels, teacher_model=teacher_model)
                         previous_best+= f"mm-acc:{result['acc']}"
                     logger.info(fp32_performance)
                     logger.info(previous_best)

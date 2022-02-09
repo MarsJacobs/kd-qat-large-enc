@@ -535,10 +535,11 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         token_type_ids=None,
         attention_mask=None,
         start_positions=None,
-        end_positions=None
+        end_positions=None,
+        teacher_probs=None
     ):
         sequence_output, att_output, attention_probs, attention_values, pooled_output = self.bert(
-            input_ids,token_type_ids,attention_mask)
+            input_ids,token_type_ids,attention_mask, teacher_probs=teacher_probs)
 
         last_sequence_output = sequence_output[-1]
 

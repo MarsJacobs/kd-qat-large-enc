@@ -70,7 +70,7 @@ learning_rate=2E-5
 other_lr=2E-5
 # ===========================================================#
 
-CUDA_VISIBLE_DEVICES=$1 python quant_task_squad_ms.py --data_dir data/squadv1.1 --task_name SQUADv1 --output_dir output --num_train_epochs 3 \
+CUDA_VISIBLE_DEVICES=$1 python quant_task_squad_ms.py --data_dir data/squadv1.1 --task_name SQUADv1 --output_dir output/squadv1 --num_train_epochs 3 \
 --weight_bits 2 --input_bits 8 --kd_layer_num ${kd_layer_num} \
 --gpu 1 --quantize ${quantize} --act_quant ${act_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
@@ -96,4 +96,5 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_squad_ms.py --data_dir data/squadv1.1 
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
 --seed 42 \
+--eval_step 1000 \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}

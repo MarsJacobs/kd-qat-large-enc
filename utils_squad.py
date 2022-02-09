@@ -890,13 +890,18 @@ def _compute_softmax(scores):
     return probs
 
 
-def do_eval(args,model, dataloader,features,examples,device,dev_dataset):
+def do_eval(args,model, dataloader,features,examples,device,dev_dataset, teacher_model=None):
     all_results = []
     for _,batch_ in tqdm(enumerate(dataloader)):
         batch_ = tuple(t.to(device) for t in batch_)
         input_ids, input_mask, segment_ids, example_indices = batch_
         with torch.no_grad():
-            (batch_start_logits, batch_end_logits),_,_,_,_ = model(input_ids, segment_ids, input_mask)
+            if teacher_model is not None:
+                _,_,_,teacher_probs ,_ = teacher_model(input_ids, segment_ids, input_mask)    
+                (batch_start_logits, batch_end_logits),_,_,_,_ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
+            else:
+                (batch_start_logits, batch_end_logits),_,_,_,_ = model(input_ids, segment_ids, input_mask)
+
         for i, example_index in enumerate(example_indices):
             start_logits = batch_start_logits[i].detach().cpu().tolist()
             end_logits = batch_end_logits[i].detach().cpu().tolist()
