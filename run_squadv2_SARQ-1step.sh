@@ -63,8 +63,8 @@ att_coeff=1
 rep_coeff=1
 
 # DA Options
-aug_train=$3
-aug_N=$4
+aug_train=$2
+aug_N=$3
 
 learning_rate=2E-5
 other_lr=2E-5
