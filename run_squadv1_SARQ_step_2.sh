@@ -66,8 +66,8 @@ rep_coeff=1
 aug_train=$2
 aug_N=$3
 
-learning_rate=2E-5
-other_lr=2E-5
+learning_rate=1E-4
+other_lr=1E-4
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_squad_ms.py --data_dir data/squadv1.1 --task_name SQUADv1 --output_dir output --num_train_epochs 3 \
@@ -96,4 +96,4 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_squad_ms.py --data_dir data/squadv1.1 
 --other_lr ${other_lr} \
 --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
 --seed 42 \
---learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}
+--learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP} 

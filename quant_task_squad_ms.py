@@ -143,7 +143,7 @@ def main():
                         help="Total number of training epochs to perform.")
     parser.add_argument('--eval_step', 
                         type=int, 
-                        default=200,
+                        default=3000,
                         help="Evaluate every X training steps")
 
     parser.add_argument("--task_name",
@@ -831,6 +831,11 @@ def main():
                 em,f1 = result['exact_match'],result['f1']
                 logger.info(f'FP {fp_em}/{fp_f1}')
                 logger.info(f'{em}/{f1}')
+
+                run["metrics/acc_em"].log(value=em, step=global_step)
+                run["metrics/acc_f1"].log(value=f1, step=global_step)
+                run["metrics/acc_em and f1"].log(value=(f1+em)/2, step=global_step)
+                
                 if f1 > best_dev_f1:
                     previous_best = f"exact_match={em},f1={f1}"
                     best_dev_f1 = f1

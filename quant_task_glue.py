@@ -8,7 +8,7 @@ import random
 import sys
 import pickle
 import copy
-
+import collections
 import math
 
 import numpy as np
@@ -64,6 +64,20 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def load_vocab(vocab_file):
+    """Loads a vocabulary file into a dictionary."""
+    vocab = collections.OrderedDict()
+    index = 0
+    with open(vocab_file, "r", encoding="utf-8") as reader:
+        while True:
+            token = reader.readline()
+            if not token:
+                break
+            token = token.strip()
+            #vocab[token] = index
+            vocab[index] = token
+            index += 1
+    return vocab
 
 def get_tensor_data(output_mode, features):
     if output_mode == "classification":
@@ -589,7 +603,7 @@ def main():
     elif args.training_type == "qat_step1":
         args.student_model = os.path.join("models",task_name.upper())
     elif args.training_type == "qat_step2": 
-        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl") 
+        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl_act") 
     elif args.training_type == "qat_step3":
         args.student_model = os.path.join("output", task_name, "quant", "step2_pact_4bit")
     elif args.training_type == "gradual": # For Gradual Quantization
@@ -671,6 +685,8 @@ def main():
     # Load Vocab FIle -> Tokenization 
     # ================================================================================ #
     tokenizer = BertTokenizer.from_pretrained(args.student_model, do_lower_case=True)
+    # save vocab file for logging
+    tokenizer.save_vocabulary("./")
 
     # ================================================================================  #
     # Dataset Setup (with DA)
@@ -930,9 +946,9 @@ def main():
     l_cls_loss = AverageMeter()
     l_loss = AverageMeter()
     
-    layer_attmap_loss = [ AverageMeter() for i in range(12) ]
-    layer_att_loss = [ AverageMeter() for i in range(12) ]
-    layer_rep_loss = [ AverageMeter() for i in range(13) ] # 12 Layers Representation, 1 Word Embedding Layer 
+    #layer_attmap_loss = [ AverageMeter() for i in range(12) ]
+    #layer_att_loss = [ AverageMeter() for i in range(12) ]
+    #layer_rep_loss = [ AverageMeter() for i in range(13) ] # 12 Layers Representation, 1 Word Embedding Layer 
 
     for epoch_ in range(int(num_train_epochs)):
         logger.info("****************************** %d Epoch ******************************", epoch_)
@@ -1020,7 +1036,7 @@ def main():
                     
                     kld_loss_sum = torch.sum(kld_loss)
 
-                    layer_attmap_loss[i].update(kld_loss_sum)
+                    #layer_attmap_loss[i].update(kld_loss_sum)
                     attmap_loss += kld_loss_sum
                 
                 l_attmap_loss.update(attmap_loss.item())
@@ -1044,7 +1060,7 @@ def main():
                     else:
                         tmp_loss = loss_mse(student_att, teacher_att)
                     
-                    layer_att_loss[i].update(tmp_loss)
+                    #layer_att_loss[i].update(tmp_loss)
                     att_loss += tmp_loss 
                     
                 l_att_loss.update(att_loss.item())
@@ -1062,7 +1078,7 @@ def main():
                     else:
                         tmp_loss = loss_mse(student_rep, teacher_rep)
                    
-                    layer_rep_loss[i].update(tmp_loss)
+                    #layer_rep_loss[i].update(tmp_loss)
                     rep_loss += tmp_loss
 
                 l_rep_loss.update(rep_loss.item())
@@ -1083,11 +1099,11 @@ def main():
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
-                    for i in range(12):
+                    # for i in range(12):
                         
-                        run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
-                        run[f"loss/layer_{i}_rep_loss_loss"].log(value=layer_rep_loss[i].avg, step=global_step)
-                        run[f"loss/layer_{i}_attmap_loss_loss"].log(value=layer_attmap_loss[i].avg, step=global_step)
+                    #     run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
+                    #     run[f"loss/layer_{i}_rep_loss_loss"].log(value=layer_rep_loss[i].avg, step=global_step)
+                    #     run[f"loss/layer_{i}_attmap_loss_loss"].log(value=layer_attmap_loss[i].avg, step=global_step)
                         
             if n_gpu > 1:
                 loss = loss.mean()
@@ -1133,15 +1149,20 @@ def main():
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
-                    for i in range(12):
+                    # for i in range(12):
 
-                        run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
-                        run[f"loss/layer_{i}_rep_loss_loss"].log(value=layer_rep_loss[i].avg, step=global_step)
-                        run[f"loss/layer_{i}_attmap_loss_loss"].log(value=layer_attmap_loss[i].avg, step=global_step)
+                    #     run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
+                    #     run[f"loss/layer_{i}_rep_loss_loss"].log(value=layer_rep_loss[i].avg, step=global_step)
+                    #     run[f"loss/layer_{i}_attmap_loss_loss"].log(value=layer_attmap_loss[i].avg, step=global_step)
 
                     # Attention Map Probability Logging (Using Sampled Test Dataset)
                     if args.prob_log:
 
+                        if args.log_map:
+                            vocab = load_vocab("vocab.txt")
+                        else :
+                            vocab = None
+                        
                         st_model = copy.deepcopy(student_model)
                         do_logging(run, st_model, teacher_model, test_dataloader, device, global_step, args, vocab)
                         logger.info(f"  {global_step} step logging done..")

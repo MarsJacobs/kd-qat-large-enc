@@ -25,6 +25,8 @@ map=0
 
 #===========================================================#
 quantizer=ternary # ternary, pact, lsq
+weight_bits=2 # 8, 2
+input_bits=8 # 8, 2
 clipping=0
 
 parks=0
@@ -66,12 +68,12 @@ rep_coeff=1
 aug_train=$3
 aug_N=$4
 
-learning_rate=2E-5
-other_lr=2E-5
+learning_rate=1E-4
+other_lr=1E-4
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 \
---weight_bits 2 --input_bits 8 --kd_layer_num ${kd_layer_num} \
+--weight_bits ${weight_bits} --input_bits ${input_bits} --kd_layer_num ${kd_layer_num} \
 --gpu 1 --quantize ${quantize} --act_quant ${act_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
 --aug_train ${aug_train} \

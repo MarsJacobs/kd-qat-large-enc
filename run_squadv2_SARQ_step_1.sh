@@ -41,7 +41,7 @@ log_metric=0
 log_map=0
 
 # Distill Option
-gt_loss=0
+gt_loss=1
 pred_distill=1
 rep_distill=1
 attn_distill=1

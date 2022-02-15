@@ -180,11 +180,19 @@ class QuantizeLinear(nn.Linear):
         
         self.register_buffer('qweight', self.weight.clone().detach())
 
+        # Weight Quantization Setting
         self.clip_initialize()
         
         if self.quantize_act:
             self.input_bits = config.input_bits
-            self.act_quantizer = SymQuantizer
+            
+            if self.input_bits == 8:
+                # Default Min-Max 8 bit Activation Quantization
+                self.act_quantizer = SymQuantizer
+            else:
+                # 2bit Ternary Activation Quantization 
+                self.act_quantizer = TwnQuantizer
+            
             self.register_buffer('act_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
 
     def clip_initialize(self):
@@ -224,7 +232,6 @@ class QuantizeLinear(nn.Linear):
         self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
 
     def forward(self, input):
-        
         # quantize weight
         if self.config.quantizer == "ternary" and self.map != True:
             weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)

@@ -28,7 +28,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from .configuration import BertConfig
-from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer, ClipLinear, ClipEmbedding
+from .utils_quant import QuantizeLinear, QuantizeEmbedding, SymQuantizer, ClipLinear, ClipEmbedding, TwnQuantizer
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +119,15 @@ class BertSelfAttention(nn.Module):
 
         # do quantization for k,q,v and attention scores
         if self.quantize_act:
+
             self.input_bits = config.input_bits
-            self.act_quantizaer = SymQuantizer
+            if self.input_bits == 8:
+                # Default Min-Max 8 bit Activation Quantization
+                self.act_quantizer = SymQuantizer
+            else:
+                # 2bit Ternary Activation Quantization 
+                self.act_quantizer = TwnQuantizer
+
             self.register_buffer('clip_query', torch.Tensor([-config.clip_val, config.clip_val]))
             self.register_buffer('clip_key', torch.Tensor([-config.clip_val, config.clip_val]))
             self.register_buffer('clip_value', torch.Tensor([-config.clip_val, config.clip_val]))
@@ -159,8 +166,8 @@ class BertSelfAttention(nn.Module):
         attention_value = value_layer
 
         if self.quantize_act:
-            query_layer = self.act_quantizaer.apply(query_layer, self.clip_query, self.input_bits, True)
-            key_layer = self.act_quantizaer.apply(key_layer, self.clip_key, self.input_bits, True)
+            query_layer = self.act_quantizer.apply(query_layer, self.clip_query, self.input_bits, True)
+            key_layer = self.act_quantizer.apply(key_layer, self.clip_key, self.input_bits, True)
 
         
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
@@ -189,9 +196,9 @@ class BertSelfAttention(nn.Module):
         
         # quantize both attention probs and value layer for dot product
         if self.quantize_act:
-            attention_probs = self.act_quantizaer.apply(attention_probs, self.clip_attn, self.input_bits, True)
-            value_layer = self.act_quantizaer.apply(value_layer, self.clip_value, self.input_bits, True)
-
+            attention_probs = self.act_quantizer.apply(attention_probs, self.clip_attn, self.input_bits, True)
+            value_layer = self.act_quantizer.apply(value_layer, self.clip_value, self.input_bits, True)
+        
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)

@@ -66,8 +66,8 @@ rep_coeff=1
 aug_train=$2
 aug_N=$3
 
-learning_rate=2E-5
-other_lr=2E-5
+learning_rate=1E-4
+other_lr=1E-4
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_squad_ms.py --data_dir data/squadv2.0 --task_name SQUADv2 --output_dir output --num_train_epochs 3 \

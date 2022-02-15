@@ -10,3 +10,5 @@ ffn_aug_maps
 ffn_kl_maps
 *.pth
 mode_pths
+*.png
+*.txt
