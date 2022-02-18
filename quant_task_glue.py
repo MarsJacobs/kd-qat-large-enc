@@ -603,7 +603,7 @@ def main():
     elif args.training_type == "qat_step1":
         args.student_model = os.path.join("models",task_name.upper())
     elif args.training_type == "qat_step2": 
-        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl_act") 
+        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl") 
     elif args.training_type == "qat_step3":
         args.student_model = os.path.join("output", task_name, "quant", "step2_pact_4bit")
     elif args.training_type == "gradual": # For Gradual Quantization

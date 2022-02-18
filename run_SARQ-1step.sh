@@ -68,8 +68,8 @@ rep_coeff=1
 aug_train=$3
 aug_N=$4
 
-learning_rate=1E-4
-other_lr=1E-4
+learning_rate=2E-4
+other_lr=2E-4
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 \

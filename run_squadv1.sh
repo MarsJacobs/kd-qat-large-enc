@@ -64,8 +64,8 @@ aug_train=0
 aug_N=30
 
 # LR
-learning_rate=1E-4
-other_lr=1E-4 # for step 2
+learning_rate=3E-4
+other_lr=3E-4 # for step 2
 
 # ===========================================================#
 
