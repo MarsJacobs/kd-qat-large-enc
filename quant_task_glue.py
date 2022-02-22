@@ -25,6 +25,7 @@ from transformer.modeling_quant import BertForSequenceClassification as QuantBer
 from transformer import BertTokenizer
 from transformer import BertAdam
 from transformer import BertConfig
+from transformer import QuantizeLinear
 from utils_glue import *
 
 import numpy as np
@@ -53,6 +54,44 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+def cv_initialize(model, loader, ratio, device):
+    def initialize_hook(module, input, output):
+        if isinstance(module, QuantizeLinear):
+            
+            if not isinstance(input, torch.Tensor):
+                input = input[0]
+            
+            """KDLSQ-BERT ACT Quant init Method
+            Ref: https://arxiv.org/abs/2101.05938
+            """
+            n = torch.numel(input)
+            input_sorted, index = torch.sort(input.reshape(-1), descending=False)
+            
+            index_min = torch.round(ratio * n / 2)
+            index_max = n - index_min
+            
+            s_init = (input_sorted[int(index_min)].to(device), input_sorted[int(index_max)].to(device)) 
+            module.clip_initialize(s_init)
+    
+    hooks = []
+
+    for name, module in model.named_modules():
+        hook = module.register_forward_hook(initialize_hook)
+        hooks.append(hook)
+    
+    model.train()
+    model.to(device)
+    
+    for step, batch in enumerate(loader):
+        batch = tuple(t.to("cuda") for t in batch)
+        input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch        
+        with torch.no_grad():
+            student_logits, student_atts, student_reps, student_probs, student_values = model(input_ids, segment_ids, input_mask, teacher_probs=None)
+        break
+    
+    for hook in hooks:
+        hook.remove()
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -400,6 +439,11 @@ def main():
                         type=str,
                         help="Quantization Method")
 
+    parser.add_argument("--act_quantizer",
+                        default="pact",
+                        type=str,
+                        help="ACT Quantization Method")
+
     #MSKIM Quantization Range Option
     parser.add_argument('--quantize',
                         default =True, type=str2bool,
@@ -494,6 +538,11 @@ def main():
                         default=0.3,
                         type=float,
                         help="PACT Clip Value Weight Decay")
+
+    parser.add_argument("--index_ratio",
+                        default=0.05,
+                        type=float,
+                        help="KDLSQ index ratio")
     
     parser.add_argument("--other_lr",
                         default=0.0001,
@@ -839,15 +888,21 @@ def main():
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
-    for name, module in student_model.named_modules():
-        if hasattr(module,'weight_quantizer'):
-            try:
-                module.clip_initialize()
-            except:
-                import pdb; pdb.set_trace()
-            #print(f"{name[13:]} {(module.weight.std()*3 / module.weight.max()).item():.2f} {(module.weight.std()*sent_i / module.weight.min()).item():.2f}")
-            
     student_model.to(device)
+
+    if args.act_quantizer == "pact":
+        cv_initialize(student_model, train_dataloader, torch.Tensor([args.index_ratio]), device)
+    
+    import pdb; pdb.set_trace()
+    # for name, module in student_model.named_modules():
+    #     if hasattr(module,'weight_quantizer'):
+    #         try:
+    #             module.clip_initialize()
+    #         except:
+    #             import pdb; pdb.set_trace()
+    #         #print(f"{name[13:]} {(module.weight.std()*3 / module.weight.max()).item():.2f} {(module.weight.std()*sent_i / module.weight.min()).item():.2f}")
+            
+    
     
     # ================================================================================  #
     # Training Setting
@@ -857,57 +912,56 @@ def main():
         student_model = torch.nn.DataParallel(student_model)
         
     # Prepare optimizer
-    if args.training_type == "qat_step1" or args.training_type == "qat_step2" or args.training_type == "qat_step3":
+    # if args.training_type == "qat_step1" or args.training_type == "qat_step2" or args.training_type == "qat_step3":
 
-        train_param_list = []
-        freeze_param_list = []
-        qk_no_decay_list = []
-        no_decay_list = []
+    #     train_param_list = []
+    #     freeze_param_list = []
+    #     qk_no_decay_list = []
+    #     no_decay_list = []
     
-        for n, p in student_model.named_parameters():
-            if "self.query.weight" in n or "self.key.weight" in n or "self.query.bias" in n or "self.key.bias" in n:
-                if "self.query.weight" in n or "self.key.weight" in n:
-                    train_param_list.append(p)
-                if "self.query.bias" in n or "self.key.bias" in n:
-                    qk_no_decay_list.append(p)
-            else:
-                if "bias" in n or "LayerNorm.bias" in n or "layerNorm.weight" in n:
-                    no_decay_list.append(p)
-                else:
-                    freeze_param_list.append(p)
-                #p.requires_grad = False
+    #     for n, p in student_model.named_parameters():
+    #         if "self.query.weight" in n or "self.key.weight" in n or "self.query.bias" in n or "self.key.bias" in n:
+    #             if "self.query.weight" in n or "self.key.weight" in n:
+    #                 train_param_list.append(p)
+    #             if "self.query.bias" in n or "self.key.bias" in n:
+    #                 qk_no_decay_list.append(p)
+    #         else:
+    #             if "bias" in n or "LayerNorm.bias" in n or "layerNorm.weight" in n:
+    #                 no_decay_list.append(p)
+    #             else:
+    #                 freeze_param_list.append(p)
+    #             #p.requires_grad = False
         
-        if args.training_type == "qat_step1": # main : other param
-            optimizer_grouped_parameters = [
-                {'params': train_param_list, 'weight_decay': 0.01, 'lr' : args.other_lr},
-                {'params': qk_no_decay_list, 'weight_decay': 0.0, 'lr' : args.other_lr},
-                {'params': freeze_param_list,'weight_decay': 0.01, 'lr': args.learning_rate},
-                {'params': no_decay_list,'weight_decay': 0.0, 'lr': args.learning_rate},
-            ]
+    #     if args.training_type == "qat_step1": # main : other param
+    #         optimizer_grouped_parameters = [
+    #             {'params': train_param_list, 'weight_decay': 0.01, 'lr' : args.other_lr},
+    #             {'params': qk_no_decay_list, 'weight_decay': 0.0, 'lr' : args.other_lr},
+    #             {'params': freeze_param_list,'weight_decay': 0.01, 'lr': args.learning_rate},
+    #             {'params': no_decay_list,'weight_decay': 0.0, 'lr': args.learning_rate},
+    #         ]
 
-        if args.training_type == "qat_step2" or args.training_type == "qat_step3":
-            optimizer_grouped_parameters = [
-                {'params': train_param_list, 'weight_decay': 0.01, 'lr' : args.learning_rate},
-                {'params': qk_no_decay_list, 'weight_decay': 0.0, 'lr' : args.learning_rate},
-                {'params': freeze_param_list,'weight_decay': 0.01, 'lr': args.other_lr},
-                {'params': no_decay_list,'weight_decay': 0.0, 'lr': args.other_lr},
-            ]
+    #     if args.training_type == "qat_step2" or args.training_type == "qat_step3":
+    #         optimizer_grouped_parameters = [
+    #             {'params': train_param_list, 'weight_decay': 0.01, 'lr' : args.learning_rate},
+    #             {'params': qk_no_decay_list, 'weight_decay': 0.0, 'lr' : args.learning_rate},
+    #             {'params': freeze_param_list,'weight_decay': 0.01, 'lr': args.other_lr},
+    #             {'params': no_decay_list,'weight_decay': 0.0, 'lr': args.other_lr},
+    #         ]
 
 
-    elif args.training_type == "qat_normal" or args.training_type == "downstream" or args.training_type == "gradual":
-        param_optimizer = list(student_model.named_parameters())
-        no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
-        clip_decay = ['clip_val', 'clip_valn']
+    #elif args.training_type == "qat_normal" or args.training_type == "downstream" or args.training_type == "gradual":
+    param_optimizer = list(student_model.named_parameters())
+    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+    clip_decay = ['clip_val', 'clip_valn']
 
-        optimizer_grouped_parameters = [
-            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in (no_decay+clip_decay))], 'weight_decay': 0.01},
-            {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
-            {'params': [p for n, p in param_optimizer if any(cv in n for cv in clip_decay)],\
-            'weight_decay': args.clip_wd if args.quantizer == "pact" else 0, 'lr': args.learning_rate * args.lr_scaling}
-        ]
+    pact_quantizer = args.quantizer == "pact" or args.act_quantizer == "pact"
     
-    else:
-         raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2}")
+    optimizer_grouped_parameters = [
+        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in (no_decay+clip_decay))], 'weight_decay': 0.01},
+        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+        {'params': [p for n, p in param_optimizer if any(cv in n for cv in clip_decay)],\
+        'weight_decay': args.clip_wd if pact_quantizer else 0, 'lr': args.learning_rate * args.lr_scaling}
+    ]
 
     schedule = 'warmup_linear'
     optimizer = BertAdam(optimizer_grouped_parameters,

@@ -43,7 +43,7 @@ class quantization(nn.Module):
         self.config = config
         
         self.index = -1
-        self.tag = 'wt'
+        self.tag = tag
         self.method = 'none'
         self.choice = 'none'
         # if logger is None:
@@ -61,7 +61,7 @@ class quantization(nn.Module):
         self.grad_type = 'none' # getattr(args, tag + '_grad_type', 'none')
         self.custom = 'none' # getattr(args, tag + '_custom', 'none')
         
-        self.bit = 4 # getattr(args, tag + '_bit', None)
+        # self.bit = bit # getattr(args, tag + '_bit', None)
         self.num_levels = None # getattr(args, tag + '_level', None)
         self.half_range = None # getattr(args, tag + '_half_range', None)
         self.scale = 0.5 # getattr(args, tag + '_scale', 0.5)

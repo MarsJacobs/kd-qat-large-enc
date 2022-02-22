@@ -11,6 +11,51 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format=log_format, datefmt='%m/%d %I:%M:%S %p')
 logger = logging.getLogger()
 
+
+class LSQ_Quantizer(torch.nn.Module):
+    def __init__(self, bit_width, is_activation=False):
+        super(LSQ_Quantizer, self).__init__()
+        
+        self.bit_width = bit_width
+        
+        self.Qn = -2**(bit_width - 1)
+        self.Qp = 2 ** (bit_width - 1) - 1
+        
+        self.s = torch.nn.Parameter(torch.ones(1))
+
+    def grad_scale(self, x, scale):
+        y_out = x
+        y_grad = x * scale
+
+        y = (y_out - y_grad).detach() + y_grad
+
+        return y
+
+    def round_pass(self, x):
+        y_out = x.round()
+        y_grad = x
+        y = torch.detach(y_out - y_grad) + y_grad
+
+        return y
+
+
+    def forward(self, x: Tensor):
+        
+        # scale_factor = torch.Tensor([1 / (x.numel() * self.Qp) ** 0.5]).to(x)
+        scale_factor = torch.Tensor([1]).to(x)
+        # zero_point = torch.Tensor([0]).to(x)
+        # bit_width = torch.Tensor([self.bit_width]).to(x)
+        
+        scale = self.grad_scale(self.s, scale_factor)
+        
+        x = x / scale
+        x = x.clamp(self.Qn, self.Qp)
+
+        x_bar = self.round_pass(x)
+
+        x_hat = x_bar * scale
+        return x_hat
+
 class SymQuantizer(torch.autograd.Function):
     """
         uniform quantization
@@ -130,8 +175,11 @@ class TwnQuantizer(torch.autograd.Function):
         mean_scale = 0.7
 
         ctx.save_for_backward(input, clip_val)
+    
         input = torch.where(input < clip_val[1], input, clip_val[1])
         input = torch.where(input > clip_val[0], input, clip_val[0])
+
+        
         if layerwise:
             m = input.norm(p=1).div(input.nelement())
             thres = mean_scale * m  
@@ -173,63 +221,84 @@ class QuantizeLinear(nn.Linear):
         self.weight_bits = config.weight_bits
         self.quantize_act = config.quantize_act
         self.mean_scale = config.mean_scale
-        
+        self.input_bits = config.input_bits
+
         self.map = map
-
         self.config = config
-        
         self.register_buffer('qweight', self.weight.clone().detach())
+        self.act_quantizer = None
 
-        # Weight Quantization Setting
-        self.clip_initialize()
+        # Weight & Activation Quantization Setting
+        self.clip_initialize()    
         
-        if self.quantize_act:
-            self.input_bits = config.input_bits
-            
-            if self.input_bits == 8:
-                # Default Min-Max 8 bit Activation Quantization
-                self.act_quantizer = SymQuantizer
-            else:
-                # 2bit Ternary Activation Quantization 
-                self.act_quantizer = TwnQuantizer
-            
-            self.register_buffer('act_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
 
-    def clip_initialize(self):
+    def clip_initialize(self, s_init=None):
         config = self.config
-        
+
+        # For Gradual Quantization (Deprecated)
         if self.map:
             self.config.quantizer = "pact"
         else:
             self.config.quantizer = "ternary"
 
-        if self.weight_bits == 2 or self.weight_bits == 4:
-            if self.config.quantizer == "ternary":
-                self.weight_quantizer = TwnQuantizer
-            if self.config.quantizer == "pact":
-                if config.clip_method == "minmax":
-                    init_clip_val = self.weight.max() * config.clip_ratio
-                    init_clip_valn = self.weight.min() * config.clip_ratio
-                elif config.clip_method == "std":
-                    init_clip_val = self.weight.std() * config.clip_ratio
-                    init_clip_valn = self.weight.std() * -1*config.clip_ratio
-                elif config.clip_method == "lsq":
-                    init_clip_val = self.weight.abs().mean() * 2 * config.clip_ratio
-                    init_clip_valn = self.weight.abs().mean()* -2 *config.clip_ratio
-                else:
-                    raise ValueError("[MS] PACT : Choose Clip Value init method")
-                # EXP : Gradual Quantization 4bit Setting (on Going)
-                self.weight_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = 4,
-                                                                         init_clip_val = init_clip_val,
-                                                                         init_clip_valn = init_clip_valn,
-                                                                         dequantize = True, 
-                                                                         inplace = False) 
-            if self.config.quantizer == 'lsq':
-                self.weight_quantizer = quantization(weight = self.weight, config=config)
-        else:
-            self.weight_quantizer = SymQuantizer
+        # Weight Quantizer Setting
+        if s_init == None:
+            if self.weight_bits < 8:
+                if self.config.quantizer == "ternary":
+                    self.weight_quantizer = TwnQuantizer
+                if self.config.quantizer == "pact":
+                    if config.clip_method == "minmax":
+                        init_clip_val = self.weight.max() * config.clip_ratio
+                        init_clip_valn = self.weight.min() * config.clip_ratio
+                    elif config.clip_method == "std":
+                        init_clip_val = self.weight.std() * config.clip_ratio
+                        init_clip_valn = self.weight.std() * -1*config.clip_ratio
+                    elif config.clip_method == "lsq":
+                        init_clip_val = self.weight.abs().mean() * 2 * config.clip_ratio
+                        init_clip_valn = self.weight.abs().mean()* -2 *config.clip_ratio
+                    else:
+                        raise ValueError("[MS] PACT : Choose Clip Value init method")
+                    # EXP : Gradual Quantization 4bit Setting (on Going)
+                    self.weight_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.weight_bits,
+                                                                            init_clip_val = init_clip_val,
+                                                                            init_clip_valn = init_clip_valn,
+                                                                            dequantize = True, 
+                                                                            inplace = False) 
+                if self.config.quantizer == 'lsq':
+                    self.weight_quantizer = quantization(weight = self.weight, config=config, tag='wt', bit=self.weight_bits)
+            else:
+                self.weight_quantizer = SymQuantizer
 
-        self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
+            self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))\
+
+            if self.input_bits < 8:
+                
+                init_clip_val = 5.0
+                init_clip_valn = -5.0
+                     
+                self.act_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.input_bits,
+                                                                            init_clip_val = init_clip_val,
+                                                                            init_clip_valn = init_clip_valn,
+                                                                            dequantize = True, 
+                                                                            inplace = False) 
+            else:
+                self.act_quantizer = SymQuantizer
+            
+            self.register_buffer('act_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
+
+        # Activation Quantizer init Clip Val setting (Revisited)
+        else:
+            if self.input_bits < 8:
+                init_clip_valn = s_init[0]
+                init_clip_val = s_init[1]
+                
+                self.act_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.input_bits,
+                                                                            init_clip_val = init_clip_val,
+                                                                            init_clip_valn = init_clip_valn,
+                                                                            dequantize = True, 
+                                                                            inplace = False) 
+            else:
+                self.act_quantizer = SymQuantizer
 
     def forward(self, input):
         # quantize weight
@@ -240,7 +309,10 @@ class QuantizeLinear(nn.Linear):
     
         # quantize input
         if self.quantize_act:
-            input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
+            if self.input_bits < 8:
+                input = self.act_quantizer(input)
+            else:
+                input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
         
         # nn.Linear w/ Quantized input and output
         out = nn.functional.linear(input, weight)
@@ -251,7 +323,7 @@ class QuantizeLinear(nn.Linear):
         return out
 
     def __repr__(self):
-        return '{0}(num_bits_weight={1}, w_quant_fn={2})'.format(self.__class__.__name__, self.weight_bits, self.weight_quantizer)
+        return '{0}(num_bits_weight={1}, num_bits_act={2}, w_quant_fn={3}, a_quant_fn={4})'.format(self.__class__.__name__, self.weight_bits, self.input_bits, self.weight_quantizer, self.act_quantizer)
 
     # MSKIM get Ternary Weight Quantization's Threshold and Alpha Value
     def get_thres_alpha(self):

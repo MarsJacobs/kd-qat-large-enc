@@ -126,7 +126,7 @@ class BertSelfAttention(nn.Module):
                 self.act_quantizer = SymQuantizer
             else:
                 # 2bit Ternary Activation Quantization 
-                self.act_quantizer = TwnQuantizer
+                self.act_quantizer = SymQuantizer
 
             self.register_buffer('clip_query', torch.Tensor([-config.clip_val, config.clip_val]))
             self.register_buffer('clip_key', torch.Tensor([-config.clip_val, config.clip_val]))
@@ -142,7 +142,6 @@ class BertSelfAttention(nn.Module):
         return x.permute(0, 2, 1, 3)
 
     def forward(self, hidden_states, attention_mask, output_att=False, teacher_probs=None):
-        
         # Stop Grad 
         if self.config.stop_grad:
             hidden_states_ = hidden_states.clone().detach()

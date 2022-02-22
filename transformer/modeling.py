@@ -106,7 +106,7 @@ class BertSelfAttention(nn.Module):
         # Value Relation
         attention_value = torch.matmul(value_layer, value_layer.transpose(-1,-2)) / math.sqrt(self.attention_head_size)
         #attention_value = value_layer
-
+        
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:

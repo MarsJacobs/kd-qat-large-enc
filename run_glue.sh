@@ -25,8 +25,9 @@ map=0
 
 #===========================================================#
 quantizer=ternary # ternary, pact, lsq
+act_quantizer=pact
 weight_bits=2 # 8, 2
-input_bits=8 # 8, 2
+input_bits=2 # 8, 2
 clipping=0
 
 parks=0
@@ -66,8 +67,8 @@ aug_train=0
 aug_N=30
 
 # LR
-learning_rate=3E-4
-other_lr=3E-4 # for step 2
+learning_rate=2E-5
+other_lr=2E-5 # for step 2
 
 # ===========================================================#
 
@@ -80,7 +81,7 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --training_type ${training_type} \
 --clipping ${clipping} \
 --mean_scale ${mean_scale} \
---quantizer ${quantizer} \
+--quantizer ${quantizer} --act_quantizer ${act_quantizer} \
 --init_scaling ${init_scaling} \
 --gradient_scaling ${gradient_scaling} \
 --lr_scaling ${lr_scaling} \

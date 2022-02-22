@@ -149,9 +149,8 @@ class LearnedTwosidedClippedLinearQuantization(nn.Module):
         return input
 
     def __repr__(self):
-        clip_str = ', pos-clip={}, neg-clip={}'.format(self.clip_val, self.clip_valn)
-        inplace_str = ', inplace' if self.inplace else ''
-        return '{0}(num_bits={1}{2}{3})'.format(self.__class__.__name__, self.num_bits, clip_str, inplace_str)
+        clip_str = ', pos-clip={}, neg-clip={}'.format(self.clip_val.item(), self.clip_valn.item())
+        return '{0}(num_bits={1}{2})'.format(self.__class__.__name__, self.num_bits, clip_str)
 
 class LearnedClippedLinearQuantizeSTE(torch.autograd.Function):
     @staticmethod
