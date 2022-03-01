@@ -18,18 +18,19 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler,Tensor
 from torch.utils.tensorboard import SummaryWriter
 
 from torch.nn import CrossEntropyLoss, MSELoss
-from torchmetrics import HammingDistance
 
 from transformer import BertForSequenceClassification,WEIGHTS_NAME, CONFIG_NAME
 from transformer.modeling_quant import BertForSequenceClassification as QuantBertForSequenceClassification
 from transformer import BertTokenizer
 from transformer import BertAdam
 from transformer import BertConfig
-from transformer import QuantizeLinear
+from transformer import QuantizeLinear, QuantizeAct, BertSelfAttention
 from utils_glue import *
+from bertviz import model_view
 
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 import torch.nn.functional as F
 
@@ -56,22 +57,43 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 def cv_initialize(model, loader, ratio, device):
+    
     def initialize_hook(module, input, output):
-        if isinstance(module, QuantizeLinear):
-            
-            if not isinstance(input, torch.Tensor):
-                input = input[0]
-            
+        if isinstance(module, (QuantizeLinear, QuantizeAct)):
             """KDLSQ-BERT ACT Quant init Method
             Ref: https://arxiv.org/abs/2101.05938
             """
+            if not isinstance(input, torch.Tensor):
+                input = input[0]
+        
             n = torch.numel(input)
             input_sorted, index = torch.sort(input.reshape(-1), descending=False)
             
             index_min = torch.round(ratio * n / 2)
             index_max = n - index_min
             
-            s_init = (input_sorted[int(index_min)].to(device), input_sorted[int(index_max)].to(device)) 
+            s_init = (input_sorted[int(index_min)].to(device), input_sorted[int(index_max)].to(device))
+            
+            # fig, [ax1, ax2] = plt.subplots(1,2, figsize=(12, 4))            
+            
+            # sns.distplot(input.reshape(-1).detach().cpu().numpy() , hist = True, rug = True, kde = True, bins=100, norm_hist=False, kde_kws=dict(linewidth=0.5), rug_kws=dict(linewidth=0.5), ax=ax1)
+            # sns.distplot(output.reshape(-1).detach().cpu().numpy() , hist = True, rug = True, kde = True, bins=100, norm_hist=False, kde_kws=dict(linewidth=0.5), rug_kws=dict(linewidth=0.5), ax=ax2)
+            # # plt.axvline(x=s_init[0].detach().cpu().numpy(), color='r', linestyle='--')
+            # # plt.axvline(x=s_init[1].detach().cpu().numpy(), color='r', linestyle='--')
+
+            # ax1.set_xlabel("Input Activation")
+            # ax2.set_xlabel("Output Activation")
+            
+            # ax1.set_ylabel("Density")
+            # ax2.set_ylabel("Density")
+
+            # ax1.set_title(f"{module.name} Input ACT histogram")
+            # ax2.set_title(f"{module.name} Output ACT histogram")
+            # plt.savefig(f"plt_storage/hook_inputs/sst-2-fp/{module.name}.png")
+            
+            # plt.close(fig)
+
+            logger.info(f"{module.name} : min {s_init[0].item()} max {s_init[1].item()}") 
             module.clip_initialize(s_init)
     
     hooks = []
@@ -160,6 +182,7 @@ def do_logging(run, student_model, teacher_model, test_dataloader, device, globa
                 for head in range(12):
                     
                     if args.log_map:
+                        
                         word_list = []
                         
                         for word in range(seq_length):
@@ -416,6 +439,10 @@ def main():
     parser.add_argument('--act_quant',
                         default=True, type=str2bool,
                         help="Whether to quantize activation")
+
+    parser.add_argument('--weight_quant',
+                        default=True, type=str2bool,
+                        help="Whether to quantize activation")
     
     parser.add_argument('--parks',
                         default=False, type=str2bool,
@@ -648,11 +675,12 @@ def main():
     if args.training_type == "downstream":
         args.student_model = os.path.join("models", "BERT_base")
     elif args.training_type == "qat_normal":
-        args.student_model = os.path.join("models",task_name.upper())
+        args.student_model = os.path.join("models",task_name.upper()) 
+        # args.student_model = os.path.join("output", task_name, "quant", "ternary_save_A4W32")        
     elif args.training_type == "qat_step1":
         args.student_model = os.path.join("models",task_name.upper())
     elif args.training_type == "qat_step2": 
-        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl") 
+        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl_act") 
     elif args.training_type == "qat_step3":
         args.student_model = os.path.join("output", task_name, "quant", "step2_pact_4bit")
     elif args.training_type == "gradual": # For Gradual Quantization
@@ -690,7 +718,7 @@ def main():
         "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 50}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":8000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
-        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":100},
+        "sst-2": {"max_seq_length": 64,"batch_size":1,"eval_step":100},
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "qnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
@@ -862,6 +890,7 @@ def main():
     # ================================================================================ #
     student_config = BertConfig.from_pretrained(args.student_model, 
                                                 quantize_act=args.act_quant,
+                                                quantize_weight=args.weight_quant,
                                                 weight_bits = args.weight_bits,
                                                 input_bits = args.input_bits,
                                                 clip_val = args.clip_val,
@@ -875,6 +904,7 @@ def main():
                                                 layer_num = args.layer_num,
                                                 mean_scale = args.mean_scale,
                                                 quantizer = args.quantizer,
+                                                act_quantizer = args.act_quantizer,
                                                 init_scaling = args.init_scaling,
                                                 clip_ratio = args.clip_ratio,
                                                 gradient_scaling = args.gradient_scaling,
@@ -890,19 +920,24 @@ def main():
     
     student_model.to(device)
 
-    if args.act_quantizer == "pact":
-        cv_initialize(student_model, train_dataloader, torch.Tensor([args.index_ratio]), device)
-    
-    import pdb; pdb.set_trace()
-    # for name, module in student_model.named_modules():
-    #     if hasattr(module,'weight_quantizer'):
-    #         try:
-    #             module.clip_initialize()
-    #         except:
-    #             import pdb; pdb.set_trace()
-    #         #print(f"{name[13:]} {(module.weight.std()*3 / module.weight.max()).item():.2f} {(module.weight.std()*sent_i / module.weight.min()).item():.2f}")
-            
-    
+    if args.act_quantizer != "ternary" and args.act_quant:
+        
+        for name, module in student_model.named_modules():
+            if isinstance(module, (QuantizeLinear, QuantizeAct)):    
+                module.act_flag = False
+                module.weight_flag = False
+        
+        # student_model.eval()
+        # result = do_eval(student_model, task_name, eval_dataloader,
+        #                             device, output_mode, eval_labels, num_labels, teacher_model=teacher_model)
+        # print(result)
+        
+        cv_initialize(student_model, train_dataloader, torch.Tensor([args.index_ratio]), device)    
+        
+        for name, module in student_model.named_modules():
+            if isinstance(module, (QuantizeLinear, QuantizeAct)):
+                module.act_flag = args.act_quant
+                module.weight_flag = args.weight_quant      
     
     # ================================================================================  #
     # Training Setting
@@ -1027,7 +1062,7 @@ def main():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             
             student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
-            
+            import pdb; pdb.set_trace()
             if args.gt_loss:
 
                 if output_mode == "classification":
@@ -1153,6 +1188,10 @@ def main():
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
+                    for n, p in student_model.named_parameters():
+                        if "clip_val" in n:
+                            run[n].log(value=p, step=global_step)
+
                     # for i in range(12):
                         
                     #     run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
@@ -1192,7 +1231,7 @@ def main():
                 result['rep_loss'] = l_rep_loss.avg
                 result['loss'] = l_loss.avg
                 
-                # Basic Logging (Training Loss)
+                # Basic Logging (Training Loss, Clip Val)
                 if run is not None:
                     
                     run["loss/total_loss"].log(value=l_loss.avg, step=global_step)
@@ -1203,6 +1242,11 @@ def main():
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
+                    # Clip Value Logging (Scale Factor)
+                    for n, p in student_model.named_parameters():
+                        if "clip_val" in n:
+                            run[n].log(value=p, step=global_step)
+                    
                     # for i in range(12):
 
                     #     run[f"loss/layer_{i}_att_loss_loss"].log(value=layer_att_loss[i].avg, step=global_step)
@@ -1213,7 +1257,7 @@ def main():
                     if args.prob_log:
 
                         if args.log_map:
-                            vocab = load_vocab("vocab.txt")
+                            vocab = load_vocab(args.student_model + "/vocab.txt")
                         else :
                             vocab = None
                         

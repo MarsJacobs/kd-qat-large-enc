@@ -3,6 +3,8 @@ import torch.nn as nn
 import sys
 import logging
 
+from transformers import SQUEEZEBERT_PRETRAINED_MODEL_ARCHIVE_LIST
+
 from .pact_func import *
 from .lsq import *
 
@@ -13,7 +15,7 @@ logger = logging.getLogger()
 
 
 class LSQ_Quantizer(torch.nn.Module):
-    def __init__(self, bit_width, is_activation=False):
+    def __init__(self, bit_width):
         super(LSQ_Quantizer, self).__init__()
         
         self.bit_width = bit_width
@@ -21,7 +23,7 @@ class LSQ_Quantizer(torch.nn.Module):
         self.Qn = -2**(bit_width - 1)
         self.Qp = 2 ** (bit_width - 1) - 1
         
-        self.s = torch.nn.Parameter(torch.ones(1))
+        self.clip_val = torch.nn.Parameter(torch.ones(1)*1)
 
     def grad_scale(self, x, scale):
         y_out = x
@@ -39,22 +41,23 @@ class LSQ_Quantizer(torch.nn.Module):
         return y
 
 
-    def forward(self, x: Tensor):
+    def forward(self, input: torch.Tensor):
         
         # scale_factor = torch.Tensor([1 / (x.numel() * self.Qp) ** 0.5]).to(x)
-        scale_factor = torch.Tensor([1]).to(x)
+        # scale = torch.Tensor([self.clip_val * 2 / 2 ** (self.bit_width)]).to(input)
         # zero_point = torch.Tensor([0]).to(x)
         # bit_width = torch.Tensor([self.bit_width]).to(x)
-        
-        scale = self.grad_scale(self.s, scale_factor)
-        
-        x = x / scale
+        # scale = self.grad_scale(self.clip_val, scale_factor)
+        x = input / (self.clip_val * 2 / 2 ** (self.bit_width - 1))
         x = x.clamp(self.Qn, self.Qp)
 
         x_bar = self.round_pass(x)
-
-        x_hat = x_bar * scale
+        x_hat = x_bar * (self.clip_val * 2 / 2 ** (self.bit_width - 1))
         return x_hat
+
+    def __repr__(self):
+        return '{0}(num_bits_act={1}, clip_val={2})'.\
+            format(self.__class__.__name__, self.bit_width, self.clip_val.item())
 
 class SymQuantizer(torch.autograd.Function):
     """
@@ -213,20 +216,78 @@ class TwnQuantizer(torch.autograd.Function):
         grad_input[input.le(clip_val[0])] = 0
         return grad_input, None, None, None
 
+class QuantizeAct(torch.nn.Module):
+    def __init__(self, num_bit, name=None, two_sided=False, config=None, act_flag=False):
+        super(QuantizeAct, self).__init__()
+        self.act_quantizer = None
+        self.num_bit = num_bit
+        self.name = name
+        self.two_sided = two_sided
+        self.config = config
+        self.act_flag = act_flag
+        self.weight_flag = None
+
+        if self.config.act_quantizer == "pact":
+            if two_sided:
+                self.act_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.num_bit,
+                                                                                    init_clip_val = 8.0,
+                                                                                    init_clip_valn = -8.0,
+                                                                                    dequantize = True, 
+                                                                                    inplace = False) 
+            else:
+                self.act_quantizer = LearnedClippedLinearQuantization(num_bits = self.num_bit,
+                                                                                    init_act_clip_val = 8.0,
+                                                                                    dequantize = True, 
+                                                                                    inplace = False) 
+        if self.config.act_quantizer == "lsq":
+            self.act_quantizer = LSQ_Quantizer(bit_width = self.num_bit)
+                                                                
+    def clip_initialize(self, s_init):        
+        if self.config.act_quantizer == "pact":
+            init_clip_val = torch.Tensor([s_init[1]]).to(s_init[1])
+            self.act_quantizer.clip_val = nn.Parameter(init_clip_val)
+
+            if self.two_sided:
+                init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
+                self.act_quantizer.clip_valn = nn.Parameter(init_clip_valn)
+
+        if self.config.act_quantizer == "lsq":
+            init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
+            init_clip_val = torch.Tensor([s_init[1]]).to(s_init[0])
+
+            if torch.abs(init_clip_valn) >= torch.abs(init_clip_val):
+                clip_val = torch.abs(init_clip_valn)
+            else:
+                clip_val = init_clip_val
+            
+            self.act_quantizer.clip_val = nn.Parameter(clip_val)
+        
+    
+    def forward(self, input):
+        if self.act_flag:
+            input = self.act_quantizer(input)
+        else:
+            input = input
+        return input
+
 class QuantizeLinear(nn.Linear):
 
-    def __init__(self,  *kargs,bias=True, config = None, map=False):
+    def __init__(self,  *kargs,bias=True, config = None, map=False, name=None, weight_flag=False, act_flag=False, input_bit=None):
         super(QuantizeLinear, self).__init__(*kargs,bias=True)
-        self.quantize_act = config.quantize_act
         self.weight_bits = config.weight_bits
-        self.quantize_act = config.quantize_act
         self.mean_scale = config.mean_scale
-        self.input_bits = config.input_bits
+        self.input_bits = input_bit
 
+        self.name = name
         self.map = map
         self.config = config
         self.register_buffer('qweight', self.weight.clone().detach())
+
         self.act_quantizer = None
+        self.weight_quantizer= None
+
+        self.weight_flag = weight_flag
+        self.act_flag = act_flag
 
         # Weight & Activation Quantization Setting
         self.clip_initialize()    
@@ -241,7 +302,9 @@ class QuantizeLinear(nn.Linear):
         else:
             self.config.quantizer = "ternary"
 
+        # ================================================================================  #
         # Weight Quantizer Setting
+        # ================================================================================ #
         if s_init == None:
             if self.weight_bits < 8:
                 if self.config.quantizer == "ternary":
@@ -270,49 +333,71 @@ class QuantizeLinear(nn.Linear):
                 self.weight_quantizer = SymQuantizer
 
             self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))\
-
-            if self.input_bits < 8:
-                
-                init_clip_val = 5.0
-                init_clip_valn = -5.0
-                     
-                self.act_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.input_bits,
-                                                                            init_clip_val = init_clip_val,
-                                                                            init_clip_valn = init_clip_valn,
-                                                                            dequantize = True, 
-                                                                            inplace = False) 
-            else:
-                self.act_quantizer = SymQuantizer
             
-            self.register_buffer('act_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
-
-        # Activation Quantizer init Clip Val setting (Revisited)
-        else:
-            if self.input_bits < 8:
-                init_clip_valn = s_init[0]
-                init_clip_val = s_init[1]
+            # ================================================================================  #
+            # Activation Quantizer
+            # ================================================================================ #
+            if self.config.quantize_act:
+                if self.config.act_quantizer == "pact":
+                    
+                    init_clip_val = 5.0
+                    init_clip_valn = -5.0
+                        
+                    self.act_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.input_bits,
+                                                                                init_clip_val = init_clip_val,
+                                                                                init_clip_valn = init_clip_valn,
+                                                                                dequantize = True, 
+                                                                                inplace = False) 
+                elif self.config.act_quantizer == "lsq":
+                    self.act_quantizer = LSQ_Quantizer(bit_width=self.input_bits)
+                else:
+                    self.act_quantizer = SymQuantizer
                 
-                self.act_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.input_bits,
-                                                                            init_clip_val = init_clip_val,
-                                                                            init_clip_valn = init_clip_valn,
-                                                                            dequantize = True, 
-                                                                            inplace = False) 
+                self.register_buffer('act_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
+
+        # ================================================================================  #
+        # Activation Quantizer init Clip Val setting (Revisited)
+        # ================================================================================ # 
+        else:
+            if self.config.act_quantizer == "pact":
+                init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
+                init_clip_val = torch.Tensor([s_init[1]]).to(s_init[0])
+                
+                self.act_quantizer.clip_val = nn.Parameter(init_clip_val)
+                self.act_quantizer.clip_valn = nn.Parameter(init_clip_valn)
+
+            elif self.config.act_quantizer == "lsq":
+                init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
+                init_clip_val = torch.Tensor([s_init[1]]).to(s_init[0])
+
+                if torch.abs(init_clip_valn) >= torch.abs(init_clip_val):
+                    clip_val = torch.abs(init_clip_valn)
+                else:
+                    clip_val = init_clip_val
+                
+                self.act_quantizer.clip_val = nn.Parameter(clip_val)
+
             else:
                 self.act_quantizer = SymQuantizer
 
     def forward(self, input):
         # quantize weight
-        if self.config.quantizer == "ternary" and self.map != True:
-            weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)
+        if self.weight_flag:
+            if self.config.quantizer == "ternary" and self.map != True:
+                weight = self.weight_quantizer.apply(self.weight, self.weight_clip_val, self.weight_bits, True)
+            else:
+                weight = self.weight_quantizer(self.weight, layerwise=True)
         else:
-            weight = self.weight_quantizer(self.weight, layerwise=True)
+            weight = self.weight
     
         # quantize input
-        if self.quantize_act:
-            if self.input_bits < 8:
+        if self.act_flag:
+            if self.config.act_quantizer != "ternary":
                 input = self.act_quantizer(input)
             else:
                 input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
+        else:
+            input = input
         
         # nn.Linear w/ Quantized input and output
         out = nn.functional.linear(input, weight)
