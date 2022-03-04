@@ -93,7 +93,7 @@ class BertSelfAttention(nn.Module):
 
         self.act_quant_flag = False
         self.weight_quant_flag = False
-
+        self.output_bertviz = True
         # ================================================================================  #
         # Weight Quant Setting
         # ================================================================================ #
@@ -185,17 +185,17 @@ class BertSelfAttention(nn.Module):
         # Value Relation 
         attention_value = value_layer
         
-        
-        if self.config.act_quantizer == "ternary":
-            query_layer = self.act_quantizer.apply(query_layer, self.clip_query, self.input_bits, True)
-            key_layer = self.act_quantizer.apply(key_layer, self.clip_key, self.input_bits, True)
-            # query_layer = self.q_act_quantizer(query_layer)
-            # key_layer = self.k_act_quantizer(key_layer)
-        else:
-            # query_layer = self.act_quantizer.apply(query_layer, self.clip_query, self.input_bits, True)
-            # key_layer = self.act_quantizer.apply(key_layer, self.clip_key, self.input_bits, True)
-            query_layer = self.q_act_quantizer(query_layer)
-            key_layer = self.k_act_quantizer(key_layer)
+        if self.config.quantize_act:
+            if self.config.act_quantizer == "ternary":
+                query_layer = self.act_quantizer.apply(query_layer, self.clip_query, self.input_bits, True)
+                key_layer = self.act_quantizer.apply(key_layer, self.clip_key, self.input_bits, True)
+                # query_layer = self.q_act_quantizer(query_layer)
+                # key_layer = self.k_act_quantizer(key_layer)
+            else:
+                # query_layer = self.act_quantizer.apply(query_layer, self.clip_query, self.input_bits, True)
+                # key_layer = self.act_quantizer.apply(key_layer, self.clip_key, self.input_bits, True)
+                query_layer = self.q_act_quantizer(query_layer)
+                key_layer = self.k_act_quantizer(key_layer)
             
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
@@ -222,22 +222,30 @@ class BertSelfAttention(nn.Module):
                 attention_probs = self.dropout(st_attention_probs)
         
         # quantize both attention probs and value layer for dot product
-        
-        if self.config.act_quantizer == "ternary":
-            attention_probs = self.act_quantizer.apply(attention_probs, self.clip_attn, self.input_bits, True)
-            value_layer = self.act_quantizer.apply(value_layer, self.clip_value, self.input_bits, True)
-            # attention_probs = self.qk_act_quantizer(attention_probs)
-            # value_layer = self.v_act_quantizer(value_layer)
-        else:
-            # attention_probs = self.act_quantizer.apply(attention_probs, self.clip_attn, self.input_bits, True)
-            # value_layer = self.act_quantizer.apply(value_layer, self.clip_value, self.input_bits, True)
-            attention_probs = self.qk_act_quantizer(attention_probs)
-            value_layer = self.v_act_quantizer(value_layer)
+        if self.config.quantize_act:
+            if self.config.act_quantizer == "ternary":
+                attention_probs = self.act_quantizer.apply(attention_probs, self.clip_attn, self.input_bits, True)
+                value_layer = self.act_quantizer.apply(value_layer, self.clip_value, self.input_bits, True)
+                # attention_probs = self.qk_act_quantizer(attention_probs)
+                # value_layer = self.v_act_quantizer(value_layer)
+            else:
+                # attention_probs = self.act_quantizer.apply(attention_probs, self.clip_attn, self.input_bits, True)
+                # value_layer = self.act_quantizer.apply(value_layer, self.clip_value, self.input_bits, True)
+                attention_probs = self.qk_act_quantizer(attention_probs)
+                value_layer = self.v_act_quantizer(value_layer)
         
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
+
+        if self.output_bertviz:
+            attn_data = {
+                'attn': attention_prob,
+                'queries': query_layer,
+                'keys': key_layer
+            }
+            attention_prob = attn_data
         return context_layer, attention_scores, attention_prob, attention_value
 
 class BertAttention(nn.Module):
