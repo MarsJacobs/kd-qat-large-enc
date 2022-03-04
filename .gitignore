@@ -12,3 +12,4 @@ ffn_kl_maps
 mode_pths
 *.png
 *.txt
+.ipynb_checkpoints 
