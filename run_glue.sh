@@ -22,12 +22,11 @@ clip_method=std
 clip_ratio=1 
 clip_wd=0.5
 lr_scaling=1
-index_ratio=0.05
-map=0
+index_ratio=0.001
 
 #===========================================================#
 quantizer=ternary # ternary, pact, lsq
-act_quantizer=lsq
+act_quantizer=$3
 weight_bits=2 # 8, 2
 input_bits=2 # 8, 2
 clipping=0
@@ -37,7 +36,7 @@ khshim=0
 khshim_FP=0
 
 # Logging Option
-exp_name=ternary_save_A4W32 
+exp_name=ternary_save_A4W2_0.001
 neptune=1
 save_quantized_model=0
 

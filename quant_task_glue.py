@@ -15,7 +15,6 @@ import numpy as np
 import numpy
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler,TensorDataset
-from torch.utils.tensorboard import SummaryWriter
 
 from torch.nn import CrossEntropyLoss, MSELoss
 
@@ -28,6 +27,7 @@ from transformer import QuantizeLinear, QuantizeAct, BertSelfAttention
 from utils_glue import *
 from bertviz import model_view
 
+from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -73,6 +73,14 @@ def cv_initialize(model, loader, ratio, device):
             index_max = n - index_min
             
             s_init = (input_sorted[int(index_min)].to(device), input_sorted[int(index_max)].to(device))
+            
+            # fig, [ax1, ax2] = plt.subplots(1,2, figsize=(12, 4))            
+            
+            # sns.histplot(data=input.reshape(-1).detach().cpu().numpy(), kde = True, bins=100, ax=ax1)
+            # sns.rugplot(data=input.reshape(-1).detach().cpu().numpy(), ax=ax1)
+            # sns.histplot(data=output.reshape(-1).detach().cpu().numpy(), kde = True, bins=100, ax=ax2)
+            # sns.rugplot(data=output.reshape(-1).detach().cpu().numpy(), ax=ax2)
+
             
             # fig, [ax1, ax2] = plt.subplots(1,2, figsize=(12, 4))            
             
@@ -306,7 +314,7 @@ def do_eval(model, task_name, eval_dataloader,
     nb_eval_steps = 0
     preds = []
 
-    for _,batch_ in enumerate(eval_dataloader):
+    for batch_ in tqdm(eval_dataloader, desc="Inference", mininterval=0.01, ascii=True, leave=False):
         batch_ = tuple(t.to(device) for t in batch_)
         
         with torch.no_grad():
@@ -924,8 +932,8 @@ def main():
         
         for name, module in student_model.named_modules():
             if isinstance(module, (QuantizeLinear, QuantizeAct)):    
-                module.act_flag = False
-                module.weight_flag = False
+                module.act_flag = True
+                module.weight_flag = True
         
         # student_model.eval()
         # result = do_eval(student_model, task_name, eval_dataloader,
@@ -1007,7 +1015,6 @@ def main():
     
     loss_mse = MSELoss()
     loss_cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
-    hamming_distance = HammingDistance()
     
     global_step = 0
     best_dev_acc = 0.0
@@ -1044,7 +1051,7 @@ def main():
         nb_tr_examples, nb_tr_steps = 0, 0
 
 
-        for step, batch in enumerate(train_dataloader):
+        for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True):
             
             student_model.train()
             
@@ -1062,7 +1069,7 @@ def main():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             
             student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
-            import pdb; pdb.set_trace()
+        
             if args.gt_loss:
 
                 if output_mode == "classification":
@@ -1084,10 +1091,10 @@ def main():
                 cls_loss = cls_loss * args.cls_coeff
                 
             if args.attnmap_distill:
-
-                BATCH_SIZE = student_probs[0].shape[0]
-                NUM_HEADS = student_probs[0].shape[1]
-                MAX_SEQ = student_probs[0].shape[2]
+                
+                BATCH_SIZE = student_probs[0]["attn"].shape[0]
+                NUM_HEADS = student_probs[0]["attn"].shape[1]
+                MAX_SEQ = student_probs[0]["attn"].shape[2]
                 
                 mask = torch.zeros(BATCH_SIZE, NUM_HEADS, MAX_SEQ, MAX_SEQ, dtype=torch.float32)
                 mask_seq = []
@@ -1099,6 +1106,9 @@ def main():
                 mask = mask.to(device)
 
                 for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)):            
+                    
+                    student_prob = student_prob["attn"]
+                    teacher_prob = teacher_prob["attn"]
 
                     # KLD(teacher || student)
                     # = sum (p(t) log p(t)) - sum(p(t) log p(s))
@@ -1106,7 +1116,7 @@ def main():
                     
                     student = torch.clamp_min(student_prob, 1e-8)
                     teacher = torch.clamp_min(teacher_prob, 1e-8)
-                    
+    
                     # Other Option (Cosine Similarity, MSE Loss)
 
                     #kld_loss_sum = loss_mse(student, teacher)

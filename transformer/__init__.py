@@ -4,3 +4,4 @@ from .configuration import BertConfig
 from .optimization import BertAdam
 from .utils_quant import QuantizeLinear, QuantizeAct
 from .modeling_quant import BertSelfAttention
+from .modeling import BertSelfAttention as FP_BertSelfAttention
