@@ -372,6 +372,10 @@ class BertModel(BertPreTrainedModel):
             token_type_ids = torch.zeros_like(input_ids)
 
         extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+<<<<<<< HEAD
+=======
+        
+>>>>>>> db2f67c54ec92b0a9e5611169d861406e463579c
         # extended_attention_mask = extended_attention_mask.to(
         #     dtype=next(self.parameters()).dtype)  # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0

@@ -699,8 +699,13 @@ def main():
     if args.training_type == "downstream":
         args.student_model = os.path.join("models", "BERT_base")
     elif args.training_type == "qat_normal":
+<<<<<<< HEAD
         # args.student_model = os.path.join("models",task_name.upper()) 
         args.student_model = os.path.join("models","BERT_large", task_name.upper()) 
+=======
+        args.student_model = os.path.join("models", "bert_large", task_name.upper())        
+        # args.student_model = os.path.join("models",task_name.upper()) 
+>>>>>>> db2f67c54ec92b0a9e5611169d861406e463579c
         # args.student_model = os.path.join("output", task_name, "quant", "ternary_save_A4W32")        
     elif args.training_type == "qat_step1":
         args.student_model = os.path.join("models",task_name.upper())
@@ -714,8 +719,13 @@ def main():
         raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2, qat_step3, gradual}")
 
     # Teacher Model Pretrained FIle    
+<<<<<<< HEAD
     # args.teacher_model = os.path.join("models",task_name.upper())
     args.teacher_model = os.path.join("models","BERT_large", task_name.upper()) 
+=======
+    args.teacher_model = os.path.join("models", "bert_large", task_name.upper())  #os.path.join("models",task_name.upper())
+    
+>>>>>>> db2f67c54ec92b0a9e5611169d861406e463579c
     processors = {
         "cola": ColaProcessor,
         "mnli": MnliProcessor,
@@ -883,6 +893,7 @@ def main():
     
     teacher_model.to(device)
     teacher_model.eval()
+    
     if n_gpu > 1:
         teacher_model = torch.nn.DataParallel(teacher_model, device_ids=range(n_gpu))
     
@@ -945,7 +956,7 @@ def main():
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
     student_model.to(device)
-
+    
     if args.act_quantizer != "ternary" and args.act_quant:
         
         for name, module in student_model.named_modules():
@@ -968,7 +979,6 @@ def main():
     # ================================================================================  #
     # Training Setting
     # ================================================================================ #
-    
     if n_gpu > 1:
         student_model = torch.nn.DataParallel(student_model)
         
