@@ -50,7 +50,8 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 attn_distill=1
-attnmap_distill=1
+attnmap_distill=$3
+word_distill=$4
 
 # deprecated
 value_relation=0
@@ -62,7 +63,8 @@ teacher_attnmap=0
 training_type=qat_normal
 
 # Loss Coeff
-attnmap_coeff=0.01
+attnmap_coeff=1
+word_coeff=1
 cls_coeff=1
 att_coeff=1
 rep_coeff=1
@@ -80,7 +82,7 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --gpu 1 --quantize ${quantize} --act_quant ${act_quant} --weight_quant ${weight_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
 --aug_train ${aug_train} \
---gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} --value_relation ${value_relation} \
+--word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} --value_relation ${value_relation} \
 --training_type ${training_type} \
 --clipping ${clipping} \
 --mean_scale ${mean_scale} \
@@ -99,6 +101,6 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --num_train_epochs 3 \
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
---attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} \
+--attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} --word_coeff ${word_coeff} \
 --seed 42 \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}

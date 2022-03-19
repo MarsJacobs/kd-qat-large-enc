@@ -23,7 +23,7 @@ from transformer.modeling_quant import BertForSequenceClassification as QuantBer
 from transformer import BertTokenizer
 from transformer import BertAdam
 from transformer import BertConfig
-from transformer import QuantizeLinear, QuantizeAct, BertSelfAttention
+from transformer import QuantizeLinear, QuantizeAct, BertSelfAttention, FP_BertSelfAttention
 from utils_glue import *
 from bertviz import model_view
 
@@ -101,7 +101,7 @@ def cv_initialize(model, loader, ratio, device):
             
             # plt.close(fig)
 
-            logger.info(f"{module.name} : min {s_init[0].item()} max {s_init[1].item()}") 
+            # logger.info(f"{module.name} : min {s_init[0].item()} max {s_init[1].item()}") 
             module.clip_initialize(s_init)
     
     hooks = []
@@ -171,7 +171,9 @@ def do_logging(run, student_model, teacher_model, test_dataloader, device, globa
     cover_sum = [0 for i in range(12)]
     cover_teacher_sum = [0 for i in range(12)]
     
-    for batch_num, batch_ in enumerate(test_dataloader):
+    batch_num = 0
+    
+    for batch_ in tqdm(test_dataloader, desc="Logging Test", mininterval=0.01, ascii=True, leave=False):
         batch_ = tuple(t.to(device) for t in batch_)
         
         if batch_num >= 1: # Visualize Attention Map only First Batch 
@@ -246,6 +248,9 @@ def do_logging(run, student_model, teacher_model, test_dataloader, device, globa
 
                     if args.log_metric:
                         
+                        student_prob = student_prob
+                        teacher_prob = teacher_prob
+
                         # Attention Map
                         student_attn_map = student_prob[0][head][:seq_length,:seq_length].clone().detach()
                         teacher_attn_map = teacher_prob[0][head][:seq_length,:seq_length].clone().detach()
@@ -290,6 +295,8 @@ def do_logging(run, student_model, teacher_model, test_dataloader, device, globa
                         cover_teacher_sum[i] += coverage_teacher_head
                         
                         nb_steps += 1
+        
+        batch_num = batch_num + 1
     
     if args.log_metric:
         nb_steps = nb_steps / 12
@@ -589,6 +596,11 @@ def main():
                         type=float,
                         help="attnmap loss coeff")
     
+    parser.add_argument("--word_coeff",
+                        default=1,
+                        type=float,
+                        help="attn wrod loss coeff")
+    
     parser.add_argument("--cls_coeff",
                         default=1,
                         type=float,
@@ -629,6 +641,10 @@ def main():
                         default =True, type=str2bool,
                         help="Ground Truth Option")
     
+    parser.add_argument('--word_distill',
+                        default =True, type=str2bool,
+                        help="Ground Truth Option")
+    
     parser.add_argument('--value_relation',
                         default =False, type=str2bool,
                         help="attention Map Distill Option")
@@ -663,7 +679,7 @@ def main():
     
     # Print Setting Info
     logger.info(f"DISTILL => rep : {args.rep_distill} | cls : {args.pred_distill} | atts : {args.attn_distill} | attmap : {args.attnmap_distill} | tc_insert : {args.teacher_attnmap} | gt_loss : {args.gt_loss}")
-    logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
+    logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | attnmap_word : {args.word_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
     logger.info('The args: {}'.format(args))
     
     # GLUE Dataset Setting
@@ -683,7 +699,8 @@ def main():
     if args.training_type == "downstream":
         args.student_model = os.path.join("models", "BERT_base")
     elif args.training_type == "qat_normal":
-        args.student_model = os.path.join("models",task_name.upper()) 
+        # args.student_model = os.path.join("models",task_name.upper()) 
+        args.student_model = os.path.join("models","BERT_large", task_name.upper()) 
         # args.student_model = os.path.join("output", task_name, "quant", "ternary_save_A4W32")        
     elif args.training_type == "qat_step1":
         args.student_model = os.path.join("models",task_name.upper())
@@ -697,8 +714,8 @@ def main():
         raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2, qat_step3, gradual}")
 
     # Teacher Model Pretrained FIle    
-    args.teacher_model = os.path.join("models",task_name.upper())
-    
+    # args.teacher_model = os.path.join("models",task_name.upper())
+    args.teacher_model = os.path.join("models","BERT_large", task_name.upper()) 
     processors = {
         "cola": ColaProcessor,
         "mnli": MnliProcessor,
@@ -774,7 +791,7 @@ def main():
     tokenizer.save_vocabulary("./")
 
     # ================================================================================  #
-    # Dataset Setup (with DA)
+    # Dataset Setup (with DAd)
     # ================================================================================ #
     if args.aug_train: # Data Augmentation
         try:
@@ -832,7 +849,7 @@ def main():
     eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.batch_size)
 
     # Test Data Extraction for logging data (10%)
-    test_features = test_features[:int(len(test_features)*0.1)]
+    test_features = test_features[:int(len(test_features)*0.05)]
     test_data, test_labels = get_tensor_data(output_mode, test_features)
     test_sampler = SequentialSampler(test_data)
     test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=1)
@@ -890,6 +907,7 @@ def main():
     if task_name == "mnli":
         result = do_eval(teacher_model, 'mnli-mm', mm_eval_dataloader,
                             device, output_mode, mm_eval_labels, num_labels)
+        logger.info(result)
         fp32_performance += f"  mm-acc:{result['acc']}"
     fp32_performance = task_name +' fp32   ' + fp32_performance
     
@@ -1041,6 +1059,7 @@ def main():
     l_rep_loss = AverageMeter()
     l_cls_loss = AverageMeter()
     l_loss = AverageMeter()
+    l_word_loss = AverageMeter()
     
     #layer_attmap_loss = [ AverageMeter() for i in range(12) ]
     #layer_att_loss = [ AverageMeter() for i in range(12) ]
@@ -1063,6 +1082,7 @@ def main():
             attmap_loss = 0.
             rep_loss = 0.
             cls_loss = 0.
+            word_loss = 0.
             loss = 0.
             
             with torch.no_grad():
@@ -1089,12 +1109,13 @@ def main():
             
                 l_cls_loss.update(cls_loss.item())
                 cls_loss = cls_loss * args.cls_coeff
-                
+            
+
             if args.attnmap_distill:
                 
-                BATCH_SIZE = student_probs[0]["attn"].shape[0]
-                NUM_HEADS = student_probs[0]["attn"].shape[1]
-                MAX_SEQ = student_probs[0]["attn"].shape[2]
+                BATCH_SIZE = student_probs[0].shape[0]
+                NUM_HEADS = student_probs[0].shape[1]
+                MAX_SEQ = student_probs[0].shape[2]
                 
                 mask = torch.zeros(BATCH_SIZE, NUM_HEADS, MAX_SEQ, MAX_SEQ, dtype=torch.float32)
                 mask_seq = []
@@ -1107,8 +1128,8 @@ def main():
 
                 for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)):            
                     
-                    student_prob = student_prob["attn"]
-                    teacher_prob = teacher_prob["attn"]
+                    # student_prob = student_prob["attn"]
+                    # teacher_prob = teacher_prob["attn"]
 
                     # KLD(teacher || student)
                     # = sum (p(t) log p(t)) - sum(p(t) log p(s))
@@ -1140,7 +1161,36 @@ def main():
                 
                 l_attmap_loss.update(attmap_loss.item())
                 attmap_loss = args.attnmap_coeff*attmap_loss
-                     
+
+            if args.word_distill:
+
+                BATCH_SIZE = student_probs[0].shape[0]
+                
+                for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):   
+                    
+                    for batch in range(BATCH_SIZE):        
+                        
+                        teacher = torch.nn.Softmax(dim=-1)(teacher_att[batch,:,:seq_lengths[batch]-1,:seq_lengths[batch]-1])
+                        student = torch.nn.Softmax(dim=-1)(student_att[batch,:,:seq_lengths[batch]-1,:seq_lengths[batch]-1])
+
+                        neg_cross_entropy = teacher * torch.log(student) 
+                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                        # p(t) log p(t) = negative entropy
+                        neg_entropy = teacher * torch.log(teacher) 
+                        neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                        neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                        kld_loss = neg_entropy - neg_cross_entropy
+
+                        kld_loss_sum = torch.mean(kld_loss)
+                        word_loss += kld_loss_sum
+                
+                l_word_loss.update(word_loss.item())
+                attmap_loss = args.word_coeff*attmap_loss
+
+
             if args.attn_distill:
 
                 for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):    
@@ -1159,6 +1209,8 @@ def main():
                     else:
                         tmp_loss = loss_mse(student_att, teacher_att)
                     
+
+
                     #layer_att_loss[i].update(tmp_loss)
                     att_loss += tmp_loss 
                     
@@ -1184,7 +1236,7 @@ def main():
                 rep_loss = args.rep_coeff * rep_loss
                 
             
-            loss += cls_loss + rep_loss + attmap_loss + att_loss
+            loss += cls_loss + rep_loss + attmap_loss + att_loss + word_loss
             l_loss.update(loss.item())
             
             # Zero Step Loss Update
@@ -1196,6 +1248,7 @@ def main():
                     run["loss/rep_loss_loss"].log(value=l_rep_loss.avg, step=global_step)
                     run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
+                    run["loss/word_loss_loss"].log(value=l_word_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
                     for n, p in student_model.named_parameters():
@@ -1250,6 +1303,7 @@ def main():
                     run["loss/rep_loss_loss"].log(value=l_rep_loss.avg, step=global_step)
                     run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
+                    run["loss/word_loss_loss"].log(value=l_word_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
                     # Clip Value Logging (Scale Factor)

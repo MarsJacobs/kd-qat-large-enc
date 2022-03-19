@@ -93,7 +93,7 @@ class BertSelfAttention(nn.Module):
 
         self.act_quant_flag = False
         self.weight_quant_flag = False
-        self.output_bertviz = True
+        self.output_bertviz = False
         # ================================================================================  #
         # Weight Quant Setting
         # ================================================================================ #
@@ -575,8 +575,8 @@ class BertModel(BertPreTrainedModel):
             token_type_ids = torch.zeros_like(input_ids)
 
         extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-        extended_attention_mask = extended_attention_mask.to(
-            dtype=next(self.parameters()).dtype)  # fp16 compatibility
+        # extended_attention_mask = extended_attention_mask.to(
+        #     dtype=next(self.parameters()).dtype)  # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
         embedding_output = self.embeddings(input_ids, token_type_ids)

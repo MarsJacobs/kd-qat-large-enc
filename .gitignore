@@ -13,3 +13,4 @@ mode_pths
 *.png
 *.txt
 .ipynb_checkpoints 
+notebook_results

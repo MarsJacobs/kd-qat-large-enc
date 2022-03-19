@@ -72,6 +72,7 @@ class SymQuantizer(torch.autograd.Function):
         :param quant_bits: number of bits
         :return: quantized tensor
         """
+        
         ctx.save_for_backward(input, clip_val)
         # input = torch.clamp(input, clip_val[0], clip_val[1])
         input = torch.where(input < clip_val[1], input, clip_val[1])
@@ -389,18 +390,18 @@ class QuantizeLinear(nn.Linear):
                 weight = self.weight_quantizer(self.weight, layerwise=True)
         else:
             weight = self.weight
-    
+        
         # quantize input
         if self.act_flag:
             if self.config.act_quantizer != "ternary":
-                input = self.act_quantizer(input)
+                q_input = self.act_quantizer(input)
             else:
-                input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
+                q_input = self.act_quantizer.apply(input, self.act_clip_val, self.input_bits, True)
         else:
-            input = input
+            q_input = input
         
         # nn.Linear w/ Quantized input and output
-        out = nn.functional.linear(input, weight)
+        out = nn.functional.linear(q_input, weight)
         
         if not self.bias is None:
             out += self.bias.view(1, -1).expand_as(out)
