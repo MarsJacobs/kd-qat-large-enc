@@ -228,8 +228,11 @@ class QuantizeAct(torch.nn.Module):
         self.act_flag = act_flag
         self.weight_flag = None
 
+        self.init_clip_val = 1.0
+        self.init_clip_valn = -1.0
+
         if self.config.act_quantizer == "pact":
-            if two_sided:
+            if self.two_sided:
                 self.act_quantizer = LearnedTwosidedClippedLinearQuantization(num_bits = self.num_bit,
                                                                                     init_clip_val = 8.0,
                                                                                     init_clip_valn = -8.0,
@@ -241,35 +244,64 @@ class QuantizeAct(torch.nn.Module):
                                                                                     dequantize = True, 
                                                                                     inplace = False) 
         if self.config.act_quantizer == "lsq":
+            # TODO : One Sided LSQ Quantizer
             self.act_quantizer = LSQ_Quantizer(bit_width = self.num_bit)
                                                                 
     def clip_initialize(self, s_init):        
-        if self.config.act_quantizer == "pact":
-            init_clip_val = torch.Tensor([s_init[1]]).to(s_init[1])
-            self.act_quantizer.clip_val = nn.Parameter(init_clip_val)
+        
+        self.init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
+        self.init_clip_val = torch.Tensor([s_init[1]]).to(s_init[0])
 
-            if self.two_sided:
-                init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
-                self.act_quantizer.clip_valn = nn.Parameter(init_clip_valn)
+        if torch.abs(self.init_clip_valn) >= torch.abs(self.init_clip_val):
+            clip_val = torch.abs(self.init_clip_valn)
+        else:
+            clip_val = self.init_clip_val
 
         if self.config.act_quantizer == "lsq":
-            init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
-            init_clip_val = torch.Tensor([s_init[1]]).to(s_init[0])
+            self.init_clip_val = nn.Parameter(clip_val)
+            self.act_quantizer.clip_val = self.init_clip_val
 
-            if torch.abs(init_clip_valn) >= torch.abs(init_clip_val):
-                clip_val = torch.abs(init_clip_valn)
-            else:
-                clip_val = init_clip_val
-            
-            self.act_quantizer.clip_val = nn.Parameter(clip_val)
+        elif self.config.act_quantizer == "pact":
+            self.act_quantizer.clip_val = nn.Parameter(self.init_clip_val)
+            if self.two_sided:
+                self.act_quantizer.clip_valn = nn.Parameter(self.init_clip_valn)
+                
+        else: # Clipping
+            self.init_clip_val = nn.Parameter(self.init_clip_val)
+            if self.two_sided:
+                self.init_clip_valn = nn.Parameter(self.init_clip_valn)
         
     
     def forward(self, input):
         if self.act_flag:
-            input = self.act_quantizer(input)
+            if self.config.act_quantizer == "pact":
+                input = self.act_quantizer(input)
+
+            elif self.config.act_quantizer == "clipping":
+
+                if self.two_sided:
+                    if self.config.act_method == "clipping":
+                        input = torch.where(input < self.init_clip_val, input, self.init_clip_val)
+                        input = torch.where(input > self.init_clip_valn, input, self.init_clip_valn)
+
+                    if self.config.act_method == "rounding":
+                        step_size = (self.init_clip_val - self.init_clip_valn) / (2 ** self.num_bit - 1)
+                        input = ((input / step_size).round() * step_size)
+                
+                else:
+                    if self.config.act_method == "clipping":
+                        input = torch.where(input < self.init_clip_val, input, self.init_clip_val)
+
+                    if self.config.act_method == "rounding":
+                        step_size = (self.init_clip_val) / (2 ** self.num_bit - 1)
+                        input = ((input / step_size).round() * step_size)
+
         else:
             input = input
         return input
+    
+    def __repr__(self):
+        return '{0}(num_bits_act={1}, a_quant_fn={2}, clip_val={3},{4})'.format(self.__class__.__name__, self.num_bit, self.act_quantizer, self.init_clip_val.item(), self.init_clip_valn.item())
 
 class QuantizeLinear(nn.Linear):
 
@@ -498,25 +530,79 @@ class QuantizeEmbedding(nn.Embedding):
 
         return thres, alpha
 
+# [EXP] Clipping/Rounding Weight/ACT Class 
 class ClipLinear(nn.Linear):
 
-    def __init__(self,  *kargs,bias=True, config = None):
+    def __init__(self,  *kargs,bias=True, config = None, two_sided = True):
         super(ClipLinear, self).__init__(*kargs,bias=True)
+        
+        self.input_bit = config.input_bits
+        self.weight_bit = config.weight_bits
+        self.weight_flag = False
+        self.act_flag = False
+        self.config = config
+        self.clip_valp = torch.nn.Parameter(torch.ones(1)*1)
+        self.clip_valn = torch.nn.Parameter(torch.ones(1)*-1)
+        self.two_sided = two_sided
 
+    def clip_initialize(self, s_init):        
+        init_clip_val = torch.Tensor([s_init[1]]).to(s_init[1])
+        self.clip_valp = nn.Parameter(init_clip_val)
+
+        if self.two_sided:
+            init_clip_valn = torch.Tensor([s_init[0]]).to(s_init[0])
+            self.clip_valn = nn.Parameter(init_clip_valn)
+        
     def forward(self, input):
-        
-        # Clippinng weight
         weight = self.weight
-        
-        m = weight.norm(p=1).div(weight.nelement())
-        
-        thres = m
-        mask = (weight.abs() > thres).float()
-        alpha = (mask * weight).abs().sum() / mask.sum()
-        
 
-        weight = torch.where(weight < alpha, weight, alpha)
-        weight = torch.where(weight > -1*alpha, weight, -1*alpha)
+        if self.weight_flag:
+            if self.config.act_method == "clipping":
+                m = weight.norm(p=1).div(weight.nelement())
+                
+                thres = m
+                mask = (weight.abs() > thres).float()
+                alpha = (mask * weight).abs().sum() / mask.sum()
+                
+
+                weight = torch.where(weight < alpha, weight, alpha)
+                weight = torch.where(weight > -1*alpha, weight, -1*alpha)
+
+            elif self.config.act_method == "rounding":
+                m = weight.norm(p=1).div(weight.nelement())
+                # m = weight.max()
+                thres = m
+
+                step_size = (thres * 2) / (2 ** self.weight_bit - 1)
+                weight = ((weight / step_size).round() * step_size)
+
+            else:
+                raise ValueError("Choose {Clipping and Rounding} Option!")
+        
+        if self.act_flag:
+            if self.two_sided:
+                if self.config.act_method == "clipping":
+                    input = torch.where(input < self.clip_valp, input, self.clip_valp)
+                    input = torch.where(input > self.clip_valn, input, self.clip_valn)
+
+                elif self.config.act_method == "rounding":
+                    step_size = (self.clip_valp - self.clip_valn) / (2 ** self.input_bit - 1)
+                    input = ((input / step_size).round())*step_size
+
+                else:
+                    input = input
+            
+            else:
+                if self.config.act_method == "clipping":
+                    input = torch.where(input < self.clip_valp, input, self.clip_valp)
+
+                elif self.config.act_method == "rounding":
+                    step_size = (self.clip_valp) / (2 ** self.input_bit - 1)
+                    input = ((input / step_size).round())*step_size
+
+                else:
+                    raise ValueError("Choose {Clipping and Rounding} Option!")
+
         
         out = nn.functional.linear(input, weight)
         
@@ -524,6 +610,9 @@ class ClipLinear(nn.Linear):
             out += self.bias.view(1, -1).expand_as(out)
 
         return out
+    
+    def __repr__(self):
+        return '{0}(input_bits={1}, act_clip_val={2},{3})'.format(self.__class__.__name__, self.input_bit, self.clip_valp.item(), self.clip_valn.item())
 
 class ClipEmbedding(nn.Embedding):
 

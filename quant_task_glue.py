@@ -23,7 +23,7 @@ from transformer.modeling_quant import BertForSequenceClassification as QuantBer
 from transformer import BertTokenizer
 from transformer import BertAdam
 from transformer import BertConfig
-from transformer import QuantizeLinear, QuantizeAct, BertSelfAttention, FP_BertSelfAttention
+from transformer import QuantizeLinear, QuantizeAct, BertSelfAttention, FP_BertSelfAttention, ClipLinear
 from utils_glue import *
 from bertviz import model_view
 
@@ -59,7 +59,7 @@ class AverageMeter(object):
 def cv_initialize(model, loader, ratio, device):
     
     def initialize_hook(module, input, output):
-        if isinstance(module, (QuantizeLinear, QuantizeAct)):
+        if isinstance(module, (QuantizeLinear, QuantizeAct, ClipLinear)):
             """KDLSQ-BERT ACT Quant init Method
             Ref: https://arxiv.org/abs/2101.05938
             """
@@ -164,12 +164,19 @@ def get_tensor_data(output_mode, features):
 
 def do_logging(run, student_model, teacher_model, test_dataloader, device, global_step, args, vocab):
     
+    if args.bert == "large":
+        layer_num = 24
+        head_num = 16
+    else:
+        layer_num = 12
+        head_num = 12
+        
     nb_steps = 0
-
-    kl_div_sum = [0 for i in range(12)]
-    st_sep_avg_sum = [0 for i in range(12)]; st_cls_avg_sum = [0 for i in range(12)]; tc_sep_avg_sum = [0 for i in range(12)]; tc_cls_avg_sum = [0 for i in range(12)]
-    cover_sum = [0 for i in range(12)]
-    cover_teacher_sum = [0 for i in range(12)]
+    
+    kl_div_sum = [0 for i in range(layer_num)]
+    st_sep_avg_sum = [0 for i in range(layer_num)]; st_cls_avg_sum = [0 for i in range(layer_num)]; tc_sep_avg_sum = [0 for i in range(layer_num)]; tc_cls_avg_sum = [0 for i in range(layer_num)]
+    cover_sum = [0 for i in range(layer_num)]
+    cover_teacher_sum = [0 for i in range(layer_num)]
     
     batch_num = 0
     
@@ -189,7 +196,7 @@ def do_logging(run, student_model, teacher_model, test_dataloader, device, globa
             for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)): 
 
                 # Head
-                for head in range(12):
+                for head in range(head_num):
                     
                     if args.log_map:
                         
@@ -610,6 +617,11 @@ def main():
                         default=1,
                         type=float,
                         help="att loss coeff")
+    
+    parser.add_argument("--val_coeff",
+                        default=1,
+                        type=float,
+                        help="att loss coeff")
 
     parser.add_argument("--rep_coeff",
                         default=1,
@@ -645,7 +657,7 @@ def main():
                         default =True, type=str2bool,
                         help="Ground Truth Option")
     
-    parser.add_argument('--value_relation',
+    parser.add_argument('--val_distill',
                         default =False, type=str2bool,
                         help="attention Map Distill Option")
 
@@ -656,6 +668,15 @@ def main():
     parser.add_argument('--map',
                         default =False, type=str2bool,
                         help="Q, K Parameter Quantization 4bit PACT")
+    
+    parser.add_argument('--bert',
+                        default ="base", type=str,
+    )
+
+    parser.add_argument('--act_method',
+                        default ="clipping", type=str,
+    )
+
     args = parser.parse_args() 
     
     # ================================================================================  #
@@ -684,33 +705,33 @@ def main():
     
     # GLUE Dataset Setting
     task_name = args.task_name.lower()
-    data_dir = os.path.join(args.data_dir,task_name.upper())
-    output_dir = os.path.join(args.output_dir,task_name)
+    data_dir = os.path.join(args.data_dir,task_name)
     processed_data_dir = os.path.join(data_dir,'preprocessed')
     if not os.path.exists(processed_data_dir):
         os.mkdir(processed_data_dir)
+    
+    # BERT Large Option
+    if args.bert == "large":
+        args.model_dir = os.path.join(args.model_dir, "BERT_large")
+        args.output_dir = os.path.join(args.output_dir, "BERT_large")
+    
+    # Model Save Directory
+    output_dir = os.path.join(args.output_dir,task_name)
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-    
+
     # ================================================================================  #
     # Load Pths
     # ================================================================================ #
     # Student Model Pretrained FIle    
     if args.training_type == "downstream":
-        args.student_model = os.path.join("models", "BERT_base")
+        args.student_model = os.path.join(args.model_dir, "BERT_base")
     elif args.training_type == "qat_normal":
-<<<<<<< HEAD
-        # args.student_model = os.path.join("models",task_name.upper()) 
-        args.student_model = os.path.join("models","BERT_large", task_name.upper()) 
-=======
-        args.student_model = os.path.join("models", "bert_large", task_name.upper())        
-        # args.student_model = os.path.join("models",task_name.upper()) 
->>>>>>> db2f67c54ec92b0a9e5611169d861406e463579c
-        # args.student_model = os.path.join("output", task_name, "quant", "ternary_save_A4W32")        
+        args.student_model = os.path.join(args.model_dir,task_name) 
     elif args.training_type == "qat_step1":
-        args.student_model = os.path.join("models",task_name.upper())
+        args.student_model = os.path.join(args.model_dir, task_name) 
     elif args.training_type == "qat_step2": 
-        args.student_model = os.path.join("output", task_name, "quant", "step_1_mse_kl_act") 
+        args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1") 
     elif args.training_type == "qat_step3":
         args.student_model = os.path.join("output", task_name, "quant", "step2_pact_4bit")
     elif args.training_type == "gradual": # For Gradual Quantization
@@ -719,13 +740,8 @@ def main():
         raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2, qat_step3, gradual}")
 
     # Teacher Model Pretrained FIle    
-<<<<<<< HEAD
-    # args.teacher_model = os.path.join("models",task_name.upper())
-    args.teacher_model = os.path.join("models","BERT_large", task_name.upper()) 
-=======
-    args.teacher_model = os.path.join("models", "bert_large", task_name.upper())  #os.path.join("models",task_name.upper())
+    args.teacher_model = os.path.join(args.model_dir,task_name)
     
->>>>>>> db2f67c54ec92b0a9e5611169d861406e463579c
     processors = {
         "cola": ColaProcessor,
         "mnli": MnliProcessor,
@@ -753,7 +769,7 @@ def main():
         "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 50}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":8000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
-        "sst-2": {"max_seq_length": 64,"batch_size":1,"eval_step":100},
+        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":100},
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "qnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
@@ -950,7 +966,8 @@ def main():
                                                 parks = args.parks,
                                                 stop_grad = args.stop_grad,
                                                 qk_FP = args.qk_FP,
-                                                map=args.map
+                                                map=args.map,
+                                                act_method = args.act_method
                                                 )
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
@@ -960,9 +977,9 @@ def main():
     if args.act_quantizer != "ternary" and args.act_quant:
         
         for name, module in student_model.named_modules():
-            if isinstance(module, (QuantizeLinear, QuantizeAct)):    
-                module.act_flag = True
-                module.weight_flag = True
+            if isinstance(module, (QuantizeLinear, QuantizeAct, ClipLinear)):    
+                module.act_flag = False
+                module.weight_flag = False
         
         # student_model.eval()
         # result = do_eval(student_model, task_name, eval_dataloader,
@@ -972,9 +989,14 @@ def main():
         cv_initialize(student_model, train_dataloader, torch.Tensor([args.index_ratio]), device)    
         
         for name, module in student_model.named_modules():
-            if isinstance(module, (QuantizeLinear, QuantizeAct)):
+            if isinstance(module, (QuantizeLinear, QuantizeAct, ClipLinear)):
                 module.act_flag = args.act_quant
                 module.weight_flag = args.weight_quant      
+    
+    for name, module in student_model.named_modules():
+        if isinstance(module, ClipLinear):
+            module.act_flag = args.act_quant
+            module.weight_flag = args.weight_quant      
     
     # ================================================================================  #
     # Training Setting
@@ -1022,7 +1044,8 @@ def main():
 
     #elif args.training_type == "qat_normal" or args.training_type == "downstream" or args.training_type == "gradual":
     param_optimizer = list(student_model.named_parameters())
-    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+
+    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight', 'temperature']
     clip_decay = ['clip_val', 'clip_valn']
 
     pact_quantizer = args.quantizer == "pact" or args.act_quantizer == "pact"
@@ -1042,7 +1065,8 @@ def main():
                             t_total=num_train_optimization_steps)
     
     loss_mse = MSELoss()
-    loss_cos = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+    norm_func = torch.linalg.norm
+    loss_cos = torch.nn.CosineSimilarity(dim=-1, eps=1e-6)
     
     global_step = 0
     best_dev_acc = 0.0
@@ -1065,6 +1089,7 @@ def main():
     # Loss Init AverageMeter
     l_gt_loss = AverageMeter()
     l_attmap_loss = AverageMeter()
+    l_val_loss = AverageMeter()
     l_att_loss = AverageMeter()
     l_rep_loss = AverageMeter()
     l_cls_loss = AverageMeter()
@@ -1090,6 +1115,7 @@ def main():
             # tmp loss init
             att_loss = 0.
             attmap_loss = 0.
+            val_loss = 0.
             rep_loss = 0.
             cls_loss = 0.
             word_loss = 0.
@@ -1149,8 +1175,7 @@ def main():
                     teacher = torch.clamp_min(teacher_prob, 1e-8)
     
                     # Other Option (Cosine Similarity, MSE Loss)
-
-                    #kld_loss_sum = loss_mse(student, teacher)
+                    # attnmap_mse_loss = loss_mse(student, teacher)
                     #kld_loss_sum = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
                     # p(t) log p(s) = negative cross entropy
                     neg_cross_entropy = teacher * torch.log(student) * mask
@@ -1167,38 +1192,31 @@ def main():
                     kld_loss_sum = torch.sum(kld_loss)
 
                     #layer_attmap_loss[i].update(kld_loss_sum)
-                    attmap_loss += kld_loss_sum
+                    # attmap_loss += attnmap_mse_loss
+                    attmap_loss += kld_loss_sum 
                 
                 l_attmap_loss.update(attmap_loss.item())
                 attmap_loss = args.attnmap_coeff*attmap_loss
 
-            if args.word_distill:
+            if args.val_distill:
 
-                BATCH_SIZE = student_probs[0].shape[0]
+                BATCH_SIZE = student_values[0][0].shape[0]
+                NUM_HEADS = student_values[0][0].shape[1]
+                MAX_SEQ = student_values[0][0].shape[2]    
+                DIM = student_values[0][0].shape[3]
                 
-                for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):   
-                    
-                    for batch in range(BATCH_SIZE):        
-                        
-                        teacher = torch.nn.Softmax(dim=-1)(teacher_att[batch,:,:seq_lengths[batch]-1,:seq_lengths[batch]-1])
-                        student = torch.nn.Softmax(dim=-1)(student_att[batch,:,:seq_lengths[batch]-1,:seq_lengths[batch]-1])
-
-                        neg_cross_entropy = teacher * torch.log(student) 
-                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
-                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
-
-                        # p(t) log p(t) = negative entropy
-                        neg_entropy = teacher * torch.log(teacher) 
-                        neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
-                        neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
-
-                        kld_loss = neg_entropy - neg_cross_entropy
-
-                        kld_loss_sum = torch.mean(kld_loss)
-                        word_loss += kld_loss_sum
+                seq_sum = 0
+                for sent in range(BATCH_SIZE):
+                    seq_sum += input_mask[sent].sum()
                 
-                l_word_loss.update(word_loss.item())
-                attmap_loss = args.word_coeff*attmap_loss
+                val_mask = input_mask.repeat(NUM_HEADS, DIM, 1, 1).permute(2, 0, 3, 1)
+                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
+                    # tmp_loss = (loss_cos(student_value[0]*val_mask, teacher_value[0]*val_mask).sum() / (seq_sum * 16))
+                    tmp_loss = loss_mse(student_value[0]*val_mask, teacher_value[0]*val_mask)
+                    val_loss += (1-tmp_loss)
+                
+                l_val_loss.update(val_loss.item())
+                val_loss = args.val_coeff * val_loss
 
 
             if args.attn_distill:
@@ -1246,7 +1264,7 @@ def main():
                 rep_loss = args.rep_coeff * rep_loss
                 
             
-            loss += cls_loss + rep_loss + attmap_loss + att_loss + word_loss
+            loss += cls_loss + rep_loss + attmap_loss + att_loss + word_loss + val_loss
             l_loss.update(loss.item())
             
             # Zero Step Loss Update
@@ -1258,6 +1276,7 @@ def main():
                     run["loss/rep_loss_loss"].log(value=l_rep_loss.avg, step=global_step)
                     run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
+                    run["loss/value_loss_loss"].log(value=l_val_loss.avg, step=global_step)
                     run["loss/word_loss_loss"].log(value=l_word_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
@@ -1312,8 +1331,8 @@ def main():
                     run["loss/att_loss_loss"].log(value=l_att_loss.avg, step=global_step)
                     run["loss/rep_loss_loss"].log(value=l_rep_loss.avg, step=global_step)
                     run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
+                    run["loss/value_loss_loss"].log(value=l_val_loss.avg, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
-                    run["loss/word_loss_loss"].log(value=l_word_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
                     # Clip Value Logging (Scale Factor)
@@ -1378,6 +1397,7 @@ def main():
                     save_model = True
 
                 if save_model:
+                    logger.info("====> Best Score *****")
                     # Test mnli-mm
                     if task_name == "mnli":
                         result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
@@ -1421,3 +1441,36 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+'''
+ if args.word_distill:
+
+                BATCH_SIZE = student_probs[0].shape[0]
+                
+                for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):   
+                    
+                    for batch in range(BATCH_SIZE):        
+                        
+                        teacher = torch.nn.Softmax(dim=-1)(teacher_att[batch,:,:seq_lengths[batch]-1,:seq_lengths[batch]-1])
+                        student = torch.nn.Softmax(dim=-1)(student_att[batch,:,:seq_lengths[batch]-1,:seq_lengths[batch]-1])
+                        
+                        # teacher = torch.nn.Softmax(dim=-1)(teacher_att[batch,:,:seq_lengths[batch],:seq_lengths[batch]] * 1)
+                        # student = torch.nn.Softmax(dim=-1)(student_att[batch,:,:seq_lengths[batch],:seq_lengths[batch]] * 1)
+                        
+                        neg_cross_entropy = teacher * torch.log(student) 
+                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                        neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                        # p(t) log p(t) = negative entropy
+                        neg_entropy = teacher * torch.log(teacher) 
+                        neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                        neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                        kld_loss = neg_entropy - neg_cross_entropy
+
+                        kld_loss_sum = torch.mean(kld_loss)
+                        word_loss += kld_loss_sum
+                
+                l_word_loss.update(word_loss.item())
+                attmap_loss = args.word_coeff*attmap_loss
+'''

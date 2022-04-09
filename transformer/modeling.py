@@ -105,8 +105,8 @@ class BertSelfAttention(nn.Module):
         value_layer = self.transpose_for_scores(mixed_value_layer)
         
         # Value Relation
-        attention_value = torch.matmul(value_layer, value_layer.transpose(-1,-2)) / math.sqrt(self.attention_head_size)
-        #attention_value = value_layer
+        # attention_value = torch.matmul(value_layer, value_layer.transpose(-1,-2)) / math.sqrt(self.attention_head_size)
+        attention_value = value_layer
         
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
@@ -118,6 +118,8 @@ class BertSelfAttention(nn.Module):
         attention_probs = self.dropout(attention_probs)
 
         context_layer = torch.matmul(attention_probs, value_layer)
+        context_layer_ = context_layer
+
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
@@ -130,7 +132,7 @@ class BertSelfAttention(nn.Module):
             }
             attention_prob = attn_data
 
-        return context_layer, attention_scores, attention_prob, attention_value
+        return context_layer, attention_scores, attention_prob, (context_layer_, attention_value)
 
 
 class BertSelfOutput(nn.Module):
@@ -139,12 +141,25 @@ class BertSelfOutput(nn.Module):
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(
+            config.hidden_size / config.num_attention_heads)
 
-    def forward(self, hidden_states, input_tensor):
+    def forward(self, hidden_states, input_tensor, layer_value):
+        # Norm Based 
+        layer_value = layer_value.permute(0, 2, 1, 3)
+        layer_value = layer_value.reshape(layer_value.shape[0], layer_value.shape[1], -1)
+        norm_based = self.dense(layer_value)
+    
+        new_size = norm_based.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+        norm_based = norm_based.view(*new_size)
+        norm_based = norm_based.permute(0, 2, 1, 3)
+
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
+        return hidden_states, norm_based
 
 class BertAttention(nn.Module):
     def __init__(self, config, i):
@@ -154,8 +169,9 @@ class BertAttention(nn.Module):
 
     def forward(self, input_tensor, attention_mask):
         self_output, layer_att, layer_probs, layer_value = self.self(input_tensor, attention_mask)
-        attention_output = self.output(self_output, input_tensor)
-        return attention_output, layer_att, layer_probs, layer_value
+        attention_output, norm_based = self.output(self_output, input_tensor, layer_value[0])
+
+        return attention_output, layer_att, layer_probs, (norm_based, layer_value[1])
 
 
 class BertIntermediate(nn.Module):
@@ -372,10 +388,7 @@ class BertModel(BertPreTrainedModel):
             token_type_ids = torch.zeros_like(input_ids)
 
         extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-<<<<<<< HEAD
-=======
         
->>>>>>> db2f67c54ec92b0a9e5611169d861406e463579c
         # extended_attention_mask = extended_attention_mask.to(
         #     dtype=next(self.parameters()).dtype)  # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0

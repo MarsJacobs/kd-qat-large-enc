@@ -94,6 +94,7 @@ class BertSelfAttention(nn.Module):
         self.act_quant_flag = False
         self.weight_quant_flag = False
         self.output_bertviz = False
+        
         # ================================================================================  #
         # Weight Quant Setting
         # ================================================================================ #
@@ -117,9 +118,9 @@ class BertSelfAttention(nn.Module):
             self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
             
         elif config.clipping:
-            self.query = ClipLinear(config.hidden_size, self.all_head_size)
-            self.key = ClipLinear(config.hidden_size, self.all_head_size)
-            self.value = ClipLinear(config.hidden_size, self.all_head_size)
+            self.query = ClipLinear(config.hidden_size, self.all_head_size, config=config)
+            self.key = ClipLinear(config.hidden_size, self.all_head_size, config=config)
+            self.value = ClipLinear(config.hidden_size, self.all_head_size, config=config)
 
         else:
             self.query = nn.Linear(config.hidden_size, self.all_head_size)
@@ -145,7 +146,7 @@ class BertSelfAttention(nn.Module):
                 self.register_buffer('clip_key', torch.Tensor([-config.clip_val, config.clip_val]))
                 self.register_buffer('clip_value', torch.Tensor([-config.clip_val, config.clip_val]))
                 self.register_buffer('clip_attn', torch.Tensor([-config.clip_val, config.clip_val]))
-
+                
             else:
                 # Nbit Ternary Activation PACT Quantization 
                 #self.act_quantizer = SymQuantizer
@@ -235,6 +236,8 @@ class BertSelfAttention(nn.Module):
                 value_layer = self.v_act_quantizer(value_layer)
         
         context_layer = torch.matmul(attention_probs, value_layer)
+        context_layer_ = context_layer
+    
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
@@ -246,7 +249,7 @@ class BertSelfAttention(nn.Module):
                 'keys': key_layer
             }
             attention_prob = attn_data
-        return context_layer, attention_scores, attention_prob, attention_value
+        return context_layer, attention_scores, attention_prob, (context_layer_, attention_value)
 
 class BertAttention(nn.Module):
     def __init__(self, config, i):
@@ -256,8 +259,11 @@ class BertAttention(nn.Module):
 
     def forward(self, input_tensor, attention_mask, teacher_probs=None):
         self_output, layer_att, layer_probs, layer_value = self.self(input_tensor, attention_mask, teacher_probs=teacher_probs)
-        attention_output = self.output(self_output, input_tensor)
-        return attention_output, layer_att, layer_probs, layer_value
+        attention_output, norm_based = self.output(self_output, input_tensor, layer_value[0])
+        
+        # MSKIM norm based analysis
+        
+        return attention_output, layer_att, layer_probs, (norm_based, layer_value[1])
 
 
 class BertSelfOutput(nn.Module):
@@ -267,6 +273,10 @@ class BertSelfOutput(nn.Module):
         is_q_layer = True
         self.act_quant_flag = False
         self.weight_quant_flag = False
+
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(
+            config.hidden_size / config.num_attention_heads)
 
         if config.layer_num != -1:
             is_q_layer = config.layer_num > i
@@ -282,7 +292,7 @@ class BertSelfOutput(nn.Module):
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config, name=f"layer_{i}_{self.__class__.__name__}_output", weight_flag=self.weight_quant_flag, act_flag=self.act_quant_flag, input_bit=config.input_bits)
             
         elif config.clipping:
-            self.dense = ClipLinear(config.hidden_size, config.hidden_size)
+            self.dense = ClipLinear(config.hidden_size, config.hidden_size, config=config)
             
         else:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -290,11 +300,20 @@ class BertSelfOutput(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, hidden_states, input_tensor):
+    def forward(self, hidden_states, input_tensor, layer_value):
+        # Norm Based 
+        layer_value = layer_value.permute(0, 2, 1, 3)
+        layer_value = layer_value.reshape(layer_value.shape[0], layer_value.shape[1], -1)
+        norm_based = self.dense(layer_value)
+
+        new_size = norm_based.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+        norm_based = norm_based.view(*new_size)
+        norm_based = norm_based.permute(0, 2, 1, 3)
+
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
+        return hidden_states, norm_based
 
 
 class BertIntermediate(nn.Module):
@@ -319,7 +338,7 @@ class BertIntermediate(nn.Module):
             self.dense = QuantizeLinear(config.hidden_size, config.intermediate_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}", weight_flag=self.weight_quant_flag, act_flag=self.act_quant_flag, input_bit=config.input_bits)
 
         elif config.clipping:
-            self.dense = ClipLinear(config.hidden_size, config.intermediate_size)
+            self.dense = ClipLinear(config.hidden_size, config.intermediate_size, config=config)
 
         else:
             self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -355,7 +374,7 @@ class BertOutput(nn.Module):
             self.dense = QuantizeLinear(config.intermediate_size, config.hidden_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}", weight_flag=self.weight_quant_flag, act_flag=self.act_quant_flag, input_bit=config.input_bits)
             
         elif config.clipping:
-            self.dense = ClipLinear(config.intermediate_size, config.hidden_size)
+            self.dense = ClipLinear(config.intermediate_size, config.hidden_size, config=config)
         else:
             self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
             
@@ -431,7 +450,7 @@ class BertPooler(nn.Module):
 
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config, name=f"{self.__class__.__name__}", weight_flag=self.weight_quant_flag, act_flag=self.act_quant_flag, input_bit=config.input_bits)
         elif config.clipping:
-            self.dense = ClipLinear(config.hidden_size, config.hidden_size)
+            self.dense = ClipLinear(config.hidden_size, config.hidden_size, config=config)
             #self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         else:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
