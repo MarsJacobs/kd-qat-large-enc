@@ -25,7 +25,7 @@ lr_scaling=1
 index_ratio=0.005
 
 #===========================================================#
-bert=base
+bert=large
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary # pact, lsq, clipping
 weight_bits=2 # 8, 2
@@ -63,7 +63,7 @@ teacher_attnmap=0
 training_type=qat_normal
 
 # Loss Coeff
-attnmap_coeff=1
+attnmap_coeff=0.01
 word_coeff=1
 cls_coeff=1
 att_coeff=1
@@ -105,5 +105,5 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --num_train_epochs 4 \
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
---seed 42 \
+--seed $3 \
 --learning_rate ${learning_rate} --parks ${parks}

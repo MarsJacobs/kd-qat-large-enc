@@ -71,7 +71,7 @@ class quantization(nn.Module):
         self.boundary = None # getattr(self.args, self.tag + '_boundary', None)
         
         self.weight = weight # MSKIM Weight for initialization
-        
+        self.bit = bit
         # if self.bit is None:
         #     self.bit = senqnn_config['nbits_w']
 

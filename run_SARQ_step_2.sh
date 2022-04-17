@@ -25,7 +25,7 @@ index_ratio=0.001
 map=0
 
 #===========================================================#
-bert=base
+bert=large
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
 weight_bits=2 # 8, 2

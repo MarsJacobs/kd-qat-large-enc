@@ -724,6 +724,7 @@ def main():
     # Load Pths
     # ================================================================================ #
     # Student Model Pretrained FIle    
+    
     if args.training_type == "downstream":
         args.student_model = os.path.join(args.model_dir, "BERT_base")
     elif args.training_type == "qat_normal":
@@ -973,7 +974,7 @@ def main():
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
     
     student_model.to(device)
-    
+    # import pdb; pdb.set_trace()
     if args.act_quantizer != "ternary" and args.act_quant:
         
         for name, module in student_model.named_modules():
@@ -1125,7 +1126,7 @@ def main():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             
             student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
-        
+            
             if args.gt_loss:
 
                 if output_mode == "classification":
@@ -1173,10 +1174,7 @@ def main():
                     
                     student = torch.clamp_min(student_prob, 1e-8)
                     teacher = torch.clamp_min(teacher_prob, 1e-8)
-    
-                    # Other Option (Cosine Similarity, MSE Loss)
-                    # attnmap_mse_loss = loss_mse(student, teacher)
-                    #kld_loss_sum = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
+
                     # p(t) log p(s) = negative cross entropy
                     neg_cross_entropy = teacher * torch.log(student) * mask
                     neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
@@ -1190,6 +1188,11 @@ def main():
                     kld_loss = neg_entropy - neg_cross_entropy
                     
                     kld_loss_sum = torch.sum(kld_loss)
+    
+                    # Other Option (Cosine Similarity, MSE Loss)
+                    # attnmap_mse_loss = loss_mse(student, teacher)
+                    #kld_loss_sum = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
+                    
 
                     #layer_attmap_loss[i].update(kld_loss_sum)
                     # attmap_loss += attnmap_mse_loss

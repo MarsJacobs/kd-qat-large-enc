@@ -183,7 +183,6 @@ class TwnQuantizer(torch.autograd.Function):
         input = torch.where(input < clip_val[1], input, clip_val[1])
         input = torch.where(input > clip_val[0], input, clip_val[0])
 
-        
         if layerwise:
             m = input.norm(p=1).div(input.nelement())
             thres = mean_scale * m  
@@ -216,6 +215,59 @@ class TwnQuantizer(torch.autograd.Function):
         grad_input[input.ge(clip_val[1])] = 0
         grad_input[input.le(clip_val[0])] = 0
         return grad_input, None, None, None
+
+class TwnQuantizer_mx(torch.autograd.Function):
+    """Ternary Weight Networks (TWN)
+    Ref: https://arxiv.org/abs/1605.04711
+    """
+    @staticmethod
+    def forward(ctx, input, clip_val, num_bits, layerwise):
+        """
+        :param input: tensor to be ternarized
+        :return: quantized tensor
+        """
+        mean_scale = 0.7
+
+        ctx.save_for_backward(input, clip_val)
+    
+        input = torch.where(input < clip_val[1], input, clip_val[1])
+        input = torch.where(input > clip_val[0], input, clip_val[0])
+        
+        if layerwise:
+            # m = input.norm(p=1).div(input.nelement())
+            thres =  input.max() 
+
+            step_size = (thres * 2) / (2 ** num_bits - 1)
+            input = torch.where(input < thres, input, thres)
+            input = torch.where(input > -1*thres, input, thres*-1)
+            result = torch.round(input / step_size) * step_size
+            
+            
+        else: # row-wise only for embed / weight
+            n = input[0].nelement()
+            m = input.data.norm(p=1, dim=1).div(n)
+            thres = (mean_scale * m).view(-1, 1).expand_as(input)
+            pos = (input > thres).float()
+            neg = (input < -thres).float()
+            mask = (input.abs() > thres).float()
+            alpha = ((mask * input).abs().sum(dim=1) / mask.sum(dim=1)).view(-1, 1)
+            result = alpha * pos - alpha * neg
+        
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """
+        :param ctx: saved non-clipped full-precision tensor and clip_val
+        :param grad_output: gradient ert the quantized tensor
+        :return: estimated gradient wrt the full-precision tensor
+        """
+        input, clip_val = ctx.saved_tensors  # unclipped input
+        grad_input = grad_output.clone()
+        grad_input[input.ge(clip_val[1])] = 0
+        grad_input[input.le(clip_val[0])] = 0
+        return grad_input, None, None, None
+
 
 class QuantizeAct(torch.nn.Module):
     def __init__(self, num_bit, name=None, two_sided=False, config=None, act_flag=False):
@@ -330,10 +382,10 @@ class QuantizeLinear(nn.Linear):
         config = self.config
 
         # For Gradual Quantization (Deprecated)
-        if self.map:
-            self.config.quantizer = "pact"
-        else:
-            self.config.quantizer = "ternary"
+        # if self.map:
+        #     self.config.quantizer = "pact"
+        # else:
+        #     self.config.quantizer = "ternary"
 
         # ================================================================================  #
         # Weight Quantizer Setting
@@ -341,6 +393,13 @@ class QuantizeLinear(nn.Linear):
         if s_init == None:
             if self.weight_bits < 8:
                 if self.config.quantizer == "ternary":
+                    
+                    # MSKIM Mixed Preicision Test (Rebuttal)
+                    # if "query" in self.name or "key" in self.name in self.name:
+                    #     self.weight_quantizer = TwnQuantizer_mx
+                    #     self.weight_bits = 8
+                    # else:
+                    #     self.weight_quantizer = TwnQuantizer
                     self.weight_quantizer = TwnQuantizer
                 if self.config.quantizer == "pact":
                     if config.clip_method == "minmax":
@@ -456,9 +515,6 @@ class QuantizeLinear(nn.Linear):
 
         return thres, alpha
 
-
-
-
 class QuantizeEmbedding(nn.Embedding):
 
     def __init__(self,  *kargs,padding_idx=None, config = None):
@@ -498,7 +554,7 @@ class QuantizeEmbedding(nn.Embedding):
                                                                          inplace = False)   
                                                                             
             if self.config.quantizer == 'lsq':
-                self.weight_quantizer = quantization(weight = self.weight, config=self.config)
+                self.weight_quantizer = quantization(weight = self.weight, config=self.config, bit = self.weight_bits)
 
         self.register_buffer('weight_clip_val', torch.tensor([-config.clip_val, config.clip_val]))
 
