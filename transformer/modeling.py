@@ -132,7 +132,7 @@ class BertSelfAttention(nn.Module):
             }
             attention_prob = attn_data
 
-        return context_layer, attention_scores, attention_prob, (context_layer_, attention_value)
+        return context_layer, attention_scores, attention_prob, context_layer_
 
 
 class BertSelfOutput(nn.Module):
@@ -146,20 +146,20 @@ class BertSelfOutput(nn.Module):
         self.attention_head_size = int(
             config.hidden_size / config.num_attention_heads)
 
-    def forward(self, hidden_states, input_tensor, layer_value):
+    def forward(self, hidden_states, input_tensor):
         # Norm Based 
-        layer_value = layer_value.permute(0, 2, 1, 3)
-        layer_value = layer_value.reshape(layer_value.shape[0], layer_value.shape[1], -1)
-        norm_based = self.dense(layer_value)
+        # layer_value = layer_value.permute(0, 2, 1, 3)
+        # layer_value = layer_value.reshape(layer_value.shape[0], layer_value.shape[1], -1)
+        # norm_based = self.dense(layer_value)
     
-        new_size = norm_based.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        norm_based = norm_based.view(*new_size)
-        norm_based = norm_based.permute(0, 2, 1, 3)
+        # new_size = norm_based.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+        # norm_based = norm_based.view(*new_size)
+        # norm_based = norm_based.permute(0, 2, 1, 3)
 
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states, norm_based
+        return hidden_states# , norm_based
 
 class BertAttention(nn.Module):
     def __init__(self, config, i):
@@ -168,10 +168,10 @@ class BertAttention(nn.Module):
         self.output = BertSelfOutput(config, i)
 
     def forward(self, input_tensor, attention_mask):
-        self_output, layer_att, layer_probs, layer_value = self.self(input_tensor, attention_mask)
-        attention_output, norm_based = self.output(self_output, input_tensor, layer_value[0])
+        self_output, layer_att, layer_probs, layer_context = self.self(input_tensor, attention_mask)
+        attention_output = self.output(self_output, input_tensor)
 
-        return attention_output, layer_att, layer_probs, (norm_based, layer_value[1])
+        return attention_output, layer_att, layer_probs, (layer_context, attention_output)
 
 
 class BertIntermediate(nn.Module):

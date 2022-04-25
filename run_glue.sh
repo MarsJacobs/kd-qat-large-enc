@@ -55,6 +55,8 @@ attn_distill=1
 attnmap_distill=0
 word_distill=0
 val_distill=0
+context_distill=0
+output_distill=0
 
 value_relation=0
 teacher_attnmap=0
@@ -69,6 +71,8 @@ cls_coeff=1
 att_coeff=1
 rep_coeff=1
 val_coeff=1
+context_coeff=1
+output_coeff=1
 
 # DA Options
 aug_train=0
@@ -85,8 +89,8 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --quantize ${quantize} --act_quant ${act_quant} --weight_quant ${weight_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
 --aug_train ${aug_train} \
---val_distill ${val_distill} --word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} \
---val_coeff ${val_coeff} --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} --word_coeff ${word_coeff} \
+--output_distill ${output_distill} --context_distill ${context_distill} --val_distill ${val_distill} --word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} \
+--output_coeff ${output_coeff} --context_coeff ${context_coeff} --val_coeff ${val_coeff} --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} --word_coeff ${word_coeff} \
 --training_type ${training_type} \
 --clipping ${clipping} --act_method ${act_method} \
 --mean_scale ${mean_scale} \
@@ -102,8 +106,8 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --neptune ${neptune} \
 --aug_N ${aug_N} \
 --prob_log ${prob_log} \
---num_train_epochs 4 \
+--num_train_epochs 6 \
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
---seed $3 \
+--seed 42 \
 --learning_rate ${learning_rate} --parks ${parks}

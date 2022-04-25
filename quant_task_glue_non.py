@@ -726,22 +726,23 @@ def main():
     # ================================================================================ #
     
     # Exp Name
-    # exp_name = args.exp_name + "_" +args.step1_option
-    # if args.attn_distill:
-    #     exp_name += "_S"
-    # if args.attnmap_distill:
-    #     exp_name += "_M"
-    # if args.context_distill:
-    #     exp_name += "_C"
-    # if args.output_distill:
-    #     exp_name += "_O"
-    # args.exp_name = exp_name
+    exp_name = args.exp_name + "_" +args.step1_option
+    if args.attn_distill:
+        exp_name += "_S"
+    if args.attnmap_distill:
+        exp_name += "_M"
+    if args.context_distill:
+        exp_name += "_C"
+    if args.output_distill:
+        exp_name += "_O"
+    args.exp_name = exp_name
     
     # Print Setting Info
-    logger.info(f"DISTILL1 => rep : {args.rep_distill} | cls : {args.pred_distill} | atts : {args.attn_distill} | attmap : {args.attnmap_distill} | tc_insert : {args.teacher_attnmap} | gt_loss : {args.gt_loss}")
-    logger.info(f"DISTILL2 => S : {args.attn_distill} M : {args.attnmap_distill} C: {args.context_distill}  O: {args.output_distill}")
+    # logger.info(f"DISTILL1 => rep : {args.rep_distill} | cls : {args.pred_distill} | atts : {args.attn_distill} | attmap : {args.attnmap_distill} | tc_insert : {args.teacher_attnmap} | gt_loss : {args.gt_loss}")
+    # logger.info(f"DISTILL2 => S : {args.attn_distill} M : {args.attnmap_distill} C: {args.context_distill}  O: {args.output_distill}")
     # logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | attnmap_word : {args.word_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
-    logger.info('The args: {}'.format(args))
+    logger.info(f'EXP SET: {exp_name}')
+    # logger.info('The args: {}'.format(args))
     
     # GLUE Dataset Setting
     task_name = args.task_name.lower()
@@ -817,10 +818,10 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 50}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 200}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":8000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
-        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":500},
+        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":100},
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "qnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
@@ -930,7 +931,7 @@ def main():
     test_data, test_labels = get_tensor_data(output_mode, test_features)
     test_sampler = SequentialSampler(test_data)
     test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=1)
-    logger.info("  Num examples for Logging = %d", len(test_features))
+    # logger.info("  Num examples for Logging = %d", len(test_features))
 
     if task_name == "mnli":
         processor = processors["mnli-mm"]()
@@ -945,7 +946,7 @@ def main():
                 pickle.dump(mm_eval_features, f, protocol=pickle.HIGHEST_PROTOCOL)
         
         mm_eval_data, mm_eval_labels = get_tensor_data(output_mode, mm_eval_features)
-        logger.info("  Num examples = %d", len(mm_eval_features))
+        # logger.info("  Num examples = %d", len(mm_eval_features))
 
         mm_eval_sampler = SequentialSampler(mm_eval_data)
         mm_eval_dataloader = DataLoader(mm_eval_data, sampler=mm_eval_sampler,
@@ -966,7 +967,7 @@ def main():
     
     result = do_eval(teacher_model, task_name, eval_dataloader,
                     device, output_mode, eval_labels, num_labels)
-    logger.info(result)
+    # logger.info(result)
     
     # ================================================================================  #
     # Save Teacher Model Peroformance for KD Training
@@ -985,7 +986,7 @@ def main():
     if task_name == "mnli":
         result = do_eval(teacher_model, 'mnli-mm', mm_eval_dataloader,
                             device, output_mode, mm_eval_labels, num_labels)
-        logger.info(result)
+        # logger.info(result)
         fp32_performance += f"  mm-acc:{result['acc']}"
     fp32_performance = task_name +' fp32   ' + fp32_performance
     
@@ -1056,45 +1057,6 @@ def main():
     if n_gpu > 1:
         student_model = torch.nn.DataParallel(student_model)
         
-    # Prepare optimizer
-    # if args.training_type == "qat_step1" or args.training_type == "qat_step2" or args.training_type == "qat_step3":
-
-    #     train_param_list = []
-    #     freeze_param_list = []
-    #     qk_no_decay_list = []
-    #     no_decay_list = []
-    
-    #     for n, p in student_model.named_parameters():
-    #         if "self.query.weight" in n or "self.key.weight" in n or "self.query.bias" in n or "self.key.bias" in n:
-    #             if "self.query.weight" in n or "self.key.weight" in n:
-    #                 train_param_list.append(p)
-    #             if "self.query.bias" in n or "self.key.bias" in n:
-    #                 qk_no_decay_list.append(p)
-    #         else:
-    #             if "bias" in n or "LayerNorm.bias" in n or "layerNorm.weight" in n:
-    #                 no_decay_list.append(p)
-    #             else:
-    #                 freeze_param_list.append(p)
-    #             #p.requires_grad = False
-        
-    #     if args.training_type == "qat_step1": # main : other param
-    #         optimizer_grouped_parameters = [
-    #             {'params': train_param_list, 'weight_decay': 0.01, 'lr' : args.other_lr},
-    #             {'params': qk_no_decay_list, 'weight_decay': 0.0, 'lr' : args.other_lr},
-    #             {'params': freeze_param_list,'weight_decay': 0.01, 'lr': args.learning_rate},
-    #             {'params': no_decay_list,'weight_decay': 0.0, 'lr': args.learning_rate},
-    #         ]
-
-    #     if args.training_type == "qat_step2" or args.training_type == "qat_step3":
-    #         optimizer_grouped_parameters = [
-    #             {'params': train_param_list, 'weight_decay': 0.01, 'lr' : args.learning_rate},
-    #             {'params': qk_no_decay_list, 'weight_decay': 0.0, 'lr' : args.learning_rate},
-    #             {'params': freeze_param_list,'weight_decay': 0.01, 'lr': args.other_lr},
-    #             {'params': no_decay_list,'weight_decay': 0.0, 'lr': args.other_lr},
-    #         ]
-
-
-    #elif args.training_type == "qat_normal" or args.training_type == "downstream" or args.training_type == "gradual":
     param_optimizer = list(student_model.named_parameters())
 
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight', 'temperature']
@@ -1133,10 +1095,10 @@ def main():
     # Training Start
     # ================================================================================ #
 
-    logger.info("***** Running training *****")
-    logger.info("  Num examples = %d", len(train_features))
-    logger.info("  Batch size = %d", args.batch_size)
-    logger.info("  Num steps = %d", num_train_optimization_steps)
+    # logger.info("***** Running training *****")
+    # logger.info("  Num examples = %d", len(train_features))
+    # logger.info("  Batch size = %d", args.batch_size)
+    # logger.info("  Num steps = %d", num_train_optimization_steps)
     
     # Loss Init AverageMeter
     l_gt_loss = AverageMeter()
@@ -1155,11 +1117,11 @@ def main():
     #layer_rep_loss = [ AverageMeter() for i in range(13) ] # 12 Layers Representation, 1 Word Embedding Layer 
 
     for epoch_ in range(int(num_train_epochs)):
-        logger.info("****************************** %d Epoch ******************************", epoch_)
+        # logger.info("****************************** %d Epoch ******************************", epoch_)
         nb_tr_examples, nb_tr_steps = 0, 0
 
 
-        for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True):
+        for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True, leave=False):
             
             student_model.train()
             
@@ -1357,7 +1319,6 @@ def main():
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["loss/value_loss_loss"].log(value=l_val_loss.avg, step=global_step)
                     run["loss/context_loss_loss"].log(value=l_context_loss.avg, step=global_step)
-                    run["loss/output_loss_loss"].log(value=l_output_loss.avg, step=global_step)
                     run["loss/word_loss_loss"].log(value=l_word_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
@@ -1385,13 +1346,13 @@ def main():
             # ================================================================================ #
 
             if global_step % args.eval_step == 0 or global_step == num_train_optimization_steps-1: # period or last step
-                logger.info("***** Running evaluation *****")
+                # logger.info("***** Running evaluation *****")
                 
-                logger.info("{} step of {} steps".format(global_step, num_train_optimization_steps))
+                # logger.info("{} step of {} steps".format(global_step, num_train_optimization_steps))
                 
-                if previous_best is not None:
-                    logger.info(f"{fp32_performance}")
-                    logger.info(f"==> Previous Best = {previous_best}")
+                # if previous_best is not None:
+                    # logger.info(f"{fp32_performance}")
+                    # logger.info(f"==> Previous Best = {previous_best}")
 
                 student_model.eval()
                 
@@ -1414,7 +1375,6 @@ def main():
                     run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
                     run["loss/value_loss_loss"].log(value=l_val_loss.avg, step=global_step)
                     run["loss/context_loss_loss"].log(value=l_context_loss.avg, step=global_step)
-                    run["loss/output_loss_loss"].log(value=l_output_loss.avg, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
@@ -1439,24 +1399,24 @@ def main():
                         
                         st_model = copy.deepcopy(student_model)
                         do_logging(run, st_model, teacher_model, test_dataloader, device, global_step, args, vocab)
-                        logger.info(f"  {global_step} step logging done..")
+                        # logger.info(f"  {global_step} step logging done..")
 
                 if task_name=='cola':
                     if run is not None:
                         run["metrics/mcc"].log(value=result['mcc'], step=global_step)
-                    logger.info(f"Eval Result is {result['mcc']}")
+                    # logger.info(f"Eval Result is {result['mcc']}")
                 elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
                     if run is not None:
                         run["metrics/acc"].log(value=result['acc'],step=global_step)
-                    logger.info(f"Eval Result is {result['acc']}")
+                    # logger.info(f"Eval Result is {result['acc']}")
                 elif task_name in ['mrpc','qqp']:
                     if run is not None:
                         run["metrics/acc_and_f1"].log(value=result['acc_and_f1'],step=global_step)
-                    logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
+                    # logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
                 else:
                     if run is not None:
                         run["metrics/corr"].log(value=result['corr'],step=global_step)
-                    logger.info(f"Eval Result is {result['corr']}")
+                    # logger.info(f"Eval Result is {result['corr']}")
 
                 # Save Model
                 save_model = False
@@ -1465,7 +1425,7 @@ def main():
                     if task_name in ['sst-2','mnli','qnli','rte']:
                         previous_best = f"acc:{result['acc']}"
                     elif task_name in ['mrpc','qqp']:
-                        previous_best = f"f1/acc:{result['f1']}/{result['acc']} avg : {result['f1'] + result['acc'] /2}"
+                        previous_best = f"f1/acc:{result['f1']}/{result['acc']} avg : {result['f1'] + result['acc']*50}"
                     best_dev_acc = result['acc']
                     save_model = True
 
@@ -1480,16 +1440,16 @@ def main():
                     save_model = True
 
                 if save_model:
-                    logger.info("====> Best Score *****")
+                    # logger.info("====> Best Score *****")
                     # Test mnli-mm
                     if task_name == "mnli":
                         result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
                                             device, output_mode, mm_eval_labels, num_labels, teacher_model=teacher_model)
                         previous_best+= f"mm-acc:{result['acc']}"
-                    logger.info(fp32_performance)
-                    logger.info(previous_best)
+                    # logger.info(fp32_performance)
+                    # logger.info(previous_best)
                     if args.save_fp_model:
-                        logger.info("***** Save full precision model *****")
+                        # logger.info("***** Save full precision model *****")
                         model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
                         output_model_file = os.path.join(output_dir, WEIGHTS_NAME)
                         output_config_file = os.path.join(output_dir, CONFIG_NAME)
@@ -1498,9 +1458,13 @@ def main():
                         model_to_save.config.to_json_file(output_config_file)
                         tokenizer.save_vocabulary(output_dir)
                     if args.save_quantized_model:
-                        logger.info("====> Save quantized model *****")
+                        # logger.info("====> Save quantized model *****")
 
-                        output_quant_dir = os.path.join(output_dir, 'quant')
+                        # output_quant_dir = os.path.join(output_dir, 'quant')
+                        output_quant_dir = os.path.join(output_dir, 'exploration')
+                        if not os.path.exists(output_quant_dir):
+                            os.mkdir(output_quant_dir)
+
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)
                         
@@ -1521,36 +1485,8 @@ def main():
                         model_to_save.config.to_json_file(output_config_file)
                         tokenizer.save_vocabulary(output_quant_dir)
     
-        if args.save_quantized_model:  
-            logger.info("====> Save Last Quantized model *****")
-            if task_name == "mnli":
-                result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
-                                    device, output_mode, mm_eval_labels, num_labels, teacher_model=teacher_model)
-                previous_best+= f"mm-acc:{result['acc']}"
-            
-            logger.info(fp32_performance)
-            logger.info(result)
-
-            output_quant_dir = os.path.join(output_dir, 'last')
-            if not os.path.exists(output_quant_dir):
-                os.makedirs(output_quant_dir)
-            
-            output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
-            if not os.path.exists(output_quant_dir):
-                os.makedirs(output_quant_dir)
-            
-            model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
-            quant_model = copy.deepcopy(model_to_save)
-            # for name, module in quant_model.named_modules():
-            #     if hasattr(module,'weight_quantizer'):
-            #         module.qweight = module.weight_quantizer(module.weight, True)
-                    
-            output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
-            output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
-
-            torch.save(quant_model.state_dict(), output_model_file)
-            model_to_save.config.to_json_file(output_config_file)
-            tokenizer.save_vocabulary(output_quant_dir)
+    logger.info(f"==> Previous Best = {previous_best}")
+    logger.info(f"==> Last Result = {result}")
 
 
 if __name__ == "__main__":

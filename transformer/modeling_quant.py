@@ -205,7 +205,7 @@ class BertSelfAttention(nn.Module):
     
         if self.config.teacher_attnmap and teacher_probs is not None:
             # Teacher Map Insertion
-            tc_attention_probs = teacher_probs[self.i]
+            tc_attention_probs = teacher_probs[0][self.i]
             attention_prob = st_attention_probs # attention probs to return (for append)
             attention_probs = self.dropout(tc_attention_probs)
 
@@ -237,10 +237,16 @@ class BertSelfAttention(nn.Module):
         
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer_ = context_layer
-    
+
+        if self.config.teacher_context and teacher_probs is not None:
+            context_layer = teacher_probs[1][self.i][0] # TI/CI - Layer Number - Context
+            # context_layer = teacher_probs[1][self.i][1] # TI/CI - Layer Number - Output
+        
+        
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
+       
 
         if self.output_bertviz:
             attn_data = {
@@ -249,7 +255,7 @@ class BertSelfAttention(nn.Module):
                 'keys': key_layer
             }
             attention_prob = attn_data
-        return context_layer, attention_scores, attention_prob, (context_layer_, attention_value)
+        return context_layer, attention_scores, attention_prob, context_layer_
 
 class BertAttention(nn.Module):
     def __init__(self, config, i):
@@ -258,12 +264,11 @@ class BertAttention(nn.Module):
         self.output = BertSelfOutput(config, i)
 
     def forward(self, input_tensor, attention_mask, teacher_probs=None):
-        self_output, layer_att, layer_probs, layer_value = self.self(input_tensor, attention_mask, teacher_probs=teacher_probs)
-        attention_output, norm_based = self.output(self_output, input_tensor, layer_value[0])
+        self_output, layer_att, layer_probs, layer_context = self.self(input_tensor, attention_mask, teacher_probs=teacher_probs)
+        attention_output = self.output(self_output, input_tensor)
         
         # MSKIM norm based analysis
-        
-        return attention_output, layer_att, layer_probs, (norm_based, layer_value[1])
+        return attention_output, layer_att, layer_probs, (layer_context, attention_output)
 
 
 class BertSelfOutput(nn.Module):
@@ -300,20 +305,20 @@ class BertSelfOutput(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, hidden_states, input_tensor, layer_value):
+    def forward(self, hidden_states, input_tensor):
         # Norm Based 
-        layer_value = layer_value.permute(0, 2, 1, 3)
-        layer_value = layer_value.reshape(layer_value.shape[0], layer_value.shape[1], -1)
-        norm_based = self.dense(layer_value)
+        # layer_value = layer_value.permute(0, 2, 1, 3)
+        # layer_value = layer_value.reshape(layer_value.shape[0], layer_value.shape[1], -1)
+        # norm_based = self.dense(layer_value)
 
-        new_size = norm_based.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        norm_based = norm_based.view(*new_size)
-        norm_based = norm_based.permute(0, 2, 1, 3)
+        # new_size = norm_based.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+        # norm_based = norm_based.view(*new_size)
+        # norm_based = norm_based.permute(0, 2, 1, 3)
 
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states, norm_based
+        return hidden_states # , norm_based
 
 
 class BertIntermediate(nn.Module):

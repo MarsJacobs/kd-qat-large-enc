@@ -38,7 +38,7 @@ stop_grad=1
 qk_FP=1
 
 # Logging Option
-exp_name=sarq_step1
+exp_name=sarq_step1_ci_o
 neptune=1
 save_quantized_model=1
 
@@ -51,18 +51,18 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 attn_distill=1
-attnmap_distill=1
+attnmap_distill=0
 word_distill=0
 val_distill=0
 context_distill=0
-output_distill=0
+output_distill=1
 
 # deprecated
 value_relation=0
 
 # Teacher Intervention (TI)
-teacher_attnmap=1
-teacher_context=0
+teacher_attnmap=0
+teacher_context=1
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
 training_type=qat_step1
