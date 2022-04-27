@@ -19,6 +19,8 @@ bash run_SARQ_step_2.sh $1 $2 co 0 0 1 0
 bash run_SARQ_step_2.sh $1 $2 co 0 0 0 1
 bash run_SARQ_step_2.sh $1 $2 co 0 1 1 0
 bash run_SARQ_step_2.sh $1 $2 co 0 1 0 1
+
+bash run_SARQ_step_1.sh $1 $2
                                 # S M C O
 bash run_SARQ_step_2.sh $1 $2 map 1 1 0 0
 bash run_SARQ_step_2.sh $1 $2 map 1 1 1 0

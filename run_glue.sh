@@ -25,7 +25,7 @@ lr_scaling=1
 index_ratio=0.005
 
 #===========================================================#
-bert=large
+bert=base
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary # pact, lsq, clipping
 weight_bits=2 # 8, 2
@@ -106,7 +106,7 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --neptune ${neptune} \
 --aug_N ${aug_N} \
 --prob_log ${prob_log} \
---num_train_epochs 6 \
+--num_train_epochs 4 \
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
 --seed 42 \

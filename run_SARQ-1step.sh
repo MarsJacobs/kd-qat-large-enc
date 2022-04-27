@@ -26,7 +26,7 @@ index_ratio=0.01
 map=0
 
 #===========================================================#
-bert=large
+bert=$7
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
 weight_bits=2 # 8, 2
@@ -39,8 +39,9 @@ qk_FP=0
 
 # Logging Option
 exp_name=SARQ-1step-context
+step1_option=map
 neptune=1
-save_quantized_model=1
+save_quantized_model=0
 
 prob_log=0
 log_metric=0
@@ -50,11 +51,14 @@ log_map=0
 gt_loss=0
 pred_distill=1
 rep_distill=1
-attn_distill=0
-attnmap_distill=1
+
+attn_distill=$3
+attnmap_distill=$4
+context_distill=$5
+output_distill=$6
+
 word_distill=0
 val_distill=0
-context_distill=1
 
 # Teacher Intervention (TI)
 teacher_attnmap=0
@@ -70,6 +74,7 @@ att_coeff=1
 rep_coeff=1
 val_coeff=1
 context_coeff=1
+output_coeff=1
 
 # DA Options
 aug_train=0
@@ -79,13 +84,13 @@ learning_rate=2E-5
 other_lr=2E-5
 # ===========================================================#
 
-CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 --bert ${bert} \
+CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 --bert ${bert} \
 --weight_bits ${weight_bits} --input_bits ${input_bits} --kd_layer_num ${kd_layer_num} \
 --gpu 1 --quantize ${quantize} --act_quant ${act_quant} --weight_quant ${weight_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
 --aug_train ${aug_train} \
---context_distill ${context_distill} --val_distill ${val_distill} --word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} \
---context_coeff ${context_coeff} --val_coeff ${val_coeff} --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} --word_coeff ${word_coeff} \
+--output_distill ${output_distill} --context_distill ${context_distill} --val_distill ${val_distill} --word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} \
+--output_coeff ${output_coeff} --context_coeff ${context_coeff} --val_coeff ${val_coeff} --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} --word_coeff ${word_coeff} \
 --training_type ${training_type} \
 --clipping ${clipping} \
 --mean_scale ${mean_scale} \
@@ -104,4 +109,5 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --teacher_attnmap ${teacher_attnmap} \
 --other_lr ${other_lr} \
 --seed 42 \
+--step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}
