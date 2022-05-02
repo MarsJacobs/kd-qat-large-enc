@@ -157,9 +157,10 @@ class BertSelfOutput(nn.Module):
         # norm_based = norm_based.permute(0, 2, 1, 3)
 
         hidden_states = self.dense(hidden_states)
+        self_output_hs = hidden_states
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states# , norm_based
+        return hidden_states, self_output_hs # , norm_based
 
 class BertAttention(nn.Module):
     def __init__(self, config, i):
@@ -169,9 +170,9 @@ class BertAttention(nn.Module):
 
     def forward(self, input_tensor, attention_mask):
         self_output, layer_att, layer_probs, layer_context = self.self(input_tensor, attention_mask)
-        attention_output = self.output(self_output, input_tensor)
+        attention_output, self_output_hs = self.output(self_output, input_tensor)
 
-        return attention_output, layer_att, layer_probs, (layer_context, attention_output)
+        return attention_output, layer_att, layer_probs, (self_output_hs, attention_output)
 
 
 class BertIntermediate(nn.Module):

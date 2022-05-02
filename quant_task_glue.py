@@ -1465,7 +1465,7 @@ def main():
                     if task_name in ['sst-2','mnli','qnli','rte']:
                         previous_best = f"acc:{result['acc']}"
                     elif task_name in ['mrpc','qqp']:
-                        previous_best = f"f1/acc:{result['f1']}/{result['acc']} avg : {result['f1'] + result['acc'] /2}"
+                        previous_best = f"f1/acc:{result['f1']}/{result['acc']} avg : {(result['f1'] + result['acc'])*50}"
                     best_dev_acc = result['acc']
                     save_model = True
 

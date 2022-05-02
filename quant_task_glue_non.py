@@ -967,7 +967,7 @@ def main():
     
     result = do_eval(teacher_model, task_name, eval_dataloader,
                     device, output_mode, eval_labels, num_labels)
-    # logger.info(result)
+    logger.info(result)
     
     # ================================================================================  #
     # Save Teacher Model Peroformance for KD Training
