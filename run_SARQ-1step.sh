@@ -38,7 +38,7 @@ stop_grad=0
 qk_FP=0
 
 # Logging Option
-exp_name=1SB
+exp_name=1SB_I
 step1_option=map
 neptune=1
 save_quantized_model=1
@@ -62,6 +62,8 @@ val_distill=0
 
 # Teacher Intervention (TI)
 teacher_attnmap=0
+teacher_input=$9
+layer_thres_num=15
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
 training_type=qat_normal
@@ -106,8 +108,8 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --neptune ${neptune} \
 --aug_N ${aug_N} \
 --prob_log ${prob_log} \
---teacher_attnmap ${teacher_attnmap} \
+--teacher_input ${teacher_input} --teacher_attnmap ${teacher_attnmap} --layer_thres_num ${layer_thres_num} \
 --other_lr ${other_lr} \
---seed 42 \
+--seed $8 \
 --step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}

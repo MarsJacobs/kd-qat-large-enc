@@ -111,11 +111,18 @@ class BertSelfAttention(nn.Module):
             if self.config.qk_FP:
                 self.query = nn.Linear(config.hidden_size, self.all_head_size)
                 self.key = nn.Linear(config.hidden_size, self.all_head_size)
+                self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+            elif self.config.qkv_FP:
+                self.query = nn.Linear(config.hidden_size, self.all_head_size)
+                self.key = nn.Linear(config.hidden_size, self.all_head_size)
+                self.value = nn.Linear(config.hidden_size, self.all_head_size)
             else:
                 self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, map=self.config.map, name=f"layer_{self.i}_{self.__class__.__name__}_query", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
                 self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, map=self.config.map, name=f"layer_{self.i}_{self.__class__.__name__}_key", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+                self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
 
-            self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+
+            
             
         elif config.clipping:
             self.query = ClipLinear(config.hidden_size, self.all_head_size, config=config)
@@ -163,17 +170,22 @@ class BertSelfAttention(nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def forward(self, hidden_states, attention_mask, output_att=False, teacher_probs=None):
+    def forward(self, hidden_states, attention_mask, teacher_probs=None):
         # Stop Grad 
-        if self.config.stop_grad:
+        if self.config.stop_grad and self.config.qk_FP:
             hidden_states_ = hidden_states.clone().detach()
             mixed_query_layer = self.query(hidden_states_)
             mixed_key_layer = self.key(hidden_states_)
+            mixed_value_layer = self.value(hidden_states)
+        elif self.config.stop_grad and self.config.qkv_FP:
+            hidden_states_ = hidden_states.clone().detach()
+            mixed_query_layer = self.query(hidden_states_)
+            mixed_key_layer = self.key(hidden_states_)
+            mixed_value_layer = self.value(hidden_states_)
         else:
             mixed_query_layer = self.query(hidden_states)
             mixed_key_layer = self.key(hidden_states)
-        
-        mixed_value_layer = self.value(hidden_states)
+            mixed_value_layer = self.value(hidden_states)
 
         # Batch Size : 16, Max_len_seq : 64
         # q, k, v : 16, 64, 768
@@ -255,20 +267,26 @@ class BertSelfAttention(nn.Module):
                 'keys': key_layer
             }
             attention_prob = attn_data
-        return context_layer, attention_scores, attention_prob, context_layer_
+        return context_layer, attention_scores, attention_prob, context_layer_, value_layer
 
 class BertAttention(nn.Module):
     def __init__(self, config, i):
         super(BertAttention, self).__init__()
         self.self = BertSelfAttention(config, i)
         self.output = BertSelfOutput(config, i)
+        self.config = config
+        self.i = i
 
     def forward(self, input_tensor, attention_mask, teacher_probs=None):
-        self_output, layer_att, layer_probs, layer_context = self.self(input_tensor, attention_mask, teacher_probs=teacher_probs)
+
+        if self.training and self.config.teacher_input and self.config.num_hidden_layers > 12 and self.i == self.config.layer_thres_num:
+            input_tensor = teacher_probs[2][self.i].clone().detach()  # Layer Input Intervention
+        
+        self_output, layer_att, layer_probs, layer_context, value_layer = self.self(input_tensor, attention_mask, teacher_probs=teacher_probs)
         attention_output, self_output_hs = self.output(self_output, input_tensor)
         
         # MSKIM norm based analysis
-        return attention_output, layer_att, layer_probs, (self_output_hs, attention_output)
+        return attention_output, layer_att, layer_probs, (layer_context, attention_output, value_layer, self_output_hs)
 
 
 class BertSelfOutput(nn.Module):

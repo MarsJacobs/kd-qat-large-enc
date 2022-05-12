@@ -336,10 +336,10 @@ def do_eval(model, task_name, eval_dataloader,
 
             # teacher attnmap test
             if teacher_model is not None:
-                logits, _, _, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
+                logits, _, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
                 
                 # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
-                logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values))
+                logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values, teacher_reps))
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
         
@@ -477,7 +477,11 @@ def main():
     
     parser.add_argument('--qk_FP',
                         default=False, type=str2bool,
-                        help="Whether to quantize activation")
+                        )
+    
+    parser.add_argument('--qkv_FP',
+                        default=False, type=str2bool,
+                        )
     
     parser.add_argument('--neptune',
                         default=True, type=str2bool,
@@ -540,6 +544,11 @@ def main():
                         help="LSQ gradient scaling")
 
     parser.add_argument("--layer_num",
+                        default=-1,
+                        type=int,
+                        help="Number of layer to quantize (-1 : Quantize every layer")
+    
+    parser.add_argument("--layer_thres_num",
                         default=-1,
                         type=int,
                         help="Number of layer to quantize (-1 : Quantize every layer")
@@ -688,6 +697,10 @@ def main():
                         default =False, type=str2bool,
                         help="Teacher Intervention Option (Context)")
     
+    parser.add_argument('--teacher_input',
+                        default =False, type=str2bool,
+                        help="Teacher Intervention Option (Input)")
+    
     parser.add_argument('--map',
                         default =False, type=str2bool,
                         help="Q, K Parameter Quantization 4bit PACT")
@@ -773,13 +786,16 @@ def main():
         args.student_model = os.path.join(args.model_dir, task_name) 
     
     elif args.training_type == "qat_step2": 
-        
         if args.step1_option == "map":
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1")
         elif args.step1_option == "cc":
-            args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_c")
+            args.student_model = os.path.join(args.output_dir, task_name, "last", "sarq_step1_ci_c_l")
+            # args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_c")
         elif args.step1_option == "co":
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_o")
+        elif args.step1_option == "three":
+            args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1.5_ci_c")
+            # args.student_model = os.path.join(args.output_dir, task_name, "last", "sarq_step1.5_ci_c_l")
         else:
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1")
     
@@ -1015,9 +1031,12 @@ def main():
                                                 clip_method = args.clip_method,
                                                 teacher_attnmap = args.teacher_attnmap,
                                                 teacher_context = args.teacher_context,
+                                                teacher_input = args.teacher_input,
+                                                layer_thres_num= args.layer_thres_num,
                                                 parks = args.parks,
                                                 stop_grad = args.stop_grad,
                                                 qk_FP = args.qk_FP,
+                                                qkv_FP = args.qkv_FP,
                                                 map=args.map,
                                                 act_method = args.act_method
                                                 )
@@ -1158,6 +1177,7 @@ def main():
         logger.info("****************************** %d Epoch ******************************", epoch_)
         nb_tr_examples, nb_tr_steps = 0, 0
 
+        student_config.layer_thres_num += 6*epoch_
 
         for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True):
             
@@ -1181,7 +1201,7 @@ def main():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
             
             # student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
-            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values))
+            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values, teacher_reps))
             
             if args.gt_loss:
 
@@ -1521,36 +1541,36 @@ def main():
                         model_to_save.config.to_json_file(output_config_file)
                         tokenizer.save_vocabulary(output_quant_dir)
     
-        if args.save_quantized_model:  
-            logger.info("====> Save Last Quantized model *****")
-            if task_name == "mnli":
-                result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
-                                    device, output_mode, mm_eval_labels, num_labels, teacher_model=teacher_model)
-                previous_best+= f"mm-acc:{result['acc']}"
-            
-            logger.info(fp32_performance)
-            logger.info(result)
+    if args.save_quantized_model:  
+        logger.info("====> Save Last Quantized model *****")
+        if task_name == "mnli":
+            result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
+                                device, output_mode, mm_eval_labels, num_labels, teacher_model=teacher_model)
+            previous_best+= f"mm-acc:{result['acc']}"
+        
+        logger.info(fp32_performance)
+        logger.info(result)
 
-            output_quant_dir = os.path.join(output_dir, 'last')
-            if not os.path.exists(output_quant_dir):
-                os.makedirs(output_quant_dir)
-            
-            output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
-            if not os.path.exists(output_quant_dir):
-                os.makedirs(output_quant_dir)
-            
-            model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
-            quant_model = copy.deepcopy(model_to_save)
-            # for name, module in quant_model.named_modules():
-            #     if hasattr(module,'weight_quantizer'):
-            #         module.qweight = module.weight_quantizer(module.weight, True)
-                    
-            output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
-            output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
+        output_quant_dir = os.path.join(output_dir, 'last')
+        if not os.path.exists(output_quant_dir):
+            os.makedirs(output_quant_dir)
+        
+        output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
+        if not os.path.exists(output_quant_dir):
+            os.makedirs(output_quant_dir)
+        
+        model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
+        quant_model = copy.deepcopy(model_to_save)
+        # for name, module in quant_model.named_modules():
+        #     if hasattr(module,'weight_quantizer'):
+        #         module.qweight = module.weight_quantizer(module.weight, True)
+                
+        output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
+        output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
 
-            torch.save(quant_model.state_dict(), output_model_file)
-            model_to_save.config.to_json_file(output_config_file)
-            tokenizer.save_vocabulary(output_quant_dir)
+        torch.save(quant_model.state_dict(), output_model_file)
+        model_to_save.config.to_json_file(output_config_file)
+        tokenizer.save_vocabulary(output_quant_dir)
 
 
 if __name__ == "__main__":

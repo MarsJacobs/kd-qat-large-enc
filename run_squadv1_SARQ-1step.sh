@@ -34,7 +34,7 @@ qk_FP=0
 # Logging Option
 exp_name=SARQ-1step
 neptune=1
-save_quantized_model=0
+save_quantized_model=1
 
 prob_log=0
 log_metric=0

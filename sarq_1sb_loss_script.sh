@@ -14,11 +14,11 @@
 # bash run_SARQ-1step.sh $1 $2 0 1 0 0 base # Map
 
 # # # Context | Output Effect Check
-# # bash run_SARQ-1step.sh $1 $2 0 0 1 0 base
+# bash run_SARQ-1step.sh $1 $2 0 0 1 0 base # Context
 # bash run_SARQ-1step.sh $1 $2 0 0 0 1 base # Output
 
 # # # AttnMap + Context/Output
-# # bash run_SARQ-1step.sh $1 $2 0 1 1 0 base
+# bash run_SARQ-1step.sh $1 $2 0 1 1 0 base # Context + Map
 # bash run_SARQ-1step.sh $1 $2 0 1 0 1 base # Output + Map
 
 #----------------------BERT LARGE----------------------#
@@ -26,18 +26,19 @@
 # bash run_SARQ-1step.sh $1 $2 1 0 0 0 large # Ternary
 # bash run_SARQ-1step.sh $1 $2 1 1 0 0 large # SARQ
 
-bash run_SARQ-1step.sh $1 $2 0 1 0 0 large # Map
+# bash run_SARQ-1step.sh $1 $2 0 1 0 0 large # Map
 
 # Context | Output Effect Check
-# bash run_SARQ-1step.sh $1 $2 0 0 1 0 large
-bash run_SARQ-1step.sh $1 $2 0 0 0 1 large # Output
+# bash run_SARQ-1step.sh $1 $2 0 0 1 0 large # Context
+# bash run_SARQ-1step.sh $1 $2 0 0 0 1 large # Output
 
 # AttnMap + Context/Output
 # bash run_SARQ-1step.sh $1 $2 0 1 1 0 large
-bash run_SARQ-1step.sh $1 $2 0 1 0 1 large # Output + Map
+# bash run_SARQ-1step.sh $1 $2 0 1 0 1 large # Output + Map
 
-# for seed in 42 52 62 72 82
-# do
-#     bash run_SARQ-1step.sh $1 $2 0 1 0 0 large ${seed} # Map
-#     bash run_SARQ-1step.sh $1 $2 0 0 0 1 large ${seed} # Output
-# done
+for seed in 42 52 62 
+do
+    bash run_SARQ-1step.sh $1 $2 0 1 0 1 large ${seed} 1 # Output + Input Intervention
+    #bash run_SARQ-1step.sh $1 $2 0 0 0 1 large ${seed} 0 # Output
+    # bash run_SARQ-1step.sh $1 $2 1 0 0 0 large ${seed} 0 # Ternary
+done

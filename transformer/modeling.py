@@ -132,7 +132,7 @@ class BertSelfAttention(nn.Module):
             }
             attention_prob = attn_data
 
-        return context_layer, attention_scores, attention_prob, context_layer_
+        return context_layer, attention_scores, attention_prob, context_layer_, value_layer
 
 
 class BertSelfOutput(nn.Module):
@@ -169,10 +169,10 @@ class BertAttention(nn.Module):
         self.output = BertSelfOutput(config, i)
 
     def forward(self, input_tensor, attention_mask):
-        self_output, layer_att, layer_probs, layer_context = self.self(input_tensor, attention_mask)
+        self_output, layer_att, layer_probs, layer_context, value_layer = self.self(input_tensor, attention_mask)
         attention_output, self_output_hs = self.output(self_output, input_tensor)
 
-        return attention_output, layer_att, layer_probs, (self_output_hs, attention_output)
+        return attention_output, layer_att, layer_probs, (layer_context, attention_output, value_layer, self_output_hs)
 
 
 class BertIntermediate(nn.Module):

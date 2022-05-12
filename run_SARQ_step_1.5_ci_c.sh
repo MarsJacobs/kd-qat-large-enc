@@ -35,11 +35,12 @@ clipping=0
 
 parks=0
 stop_grad=1
-qk_FP=0
-qkv_FP=1
+qk_FP=1
+qkv_FP=0
 
 # Logging Option
-exp_name=sarq_step1_ci_c
+exp_name=sarq_step1.5_ci_c
+step1_option=cc
 neptune=1
 save_quantized_model=1
 
@@ -52,21 +53,21 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 attn_distill=0
-attnmap_distill=0
+attnmap_distill=1
 word_distill=0
 val_distill=0
-context_distill=1
+context_distill=0
 output_distill=0
 
 # deprecated
 value_relation=0
 
 # Teacher Intervention (TI)
-teacher_attnmap=0
-teacher_context=1
+teacher_attnmap=1
+teacher_context=0
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
-training_type=qat_step1
+training_type=qat_step2
 
 # Loss Coeff
 attnmap_coeff=1
@@ -112,4 +113,5 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue.py --data_dir data --task_name $2
 --teacher_attnmap ${teacher_attnmap} --teacher_context ${teacher_context} \
 --other_lr ${other_lr} \
 --seed 42 \
+--step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP} --qkv_FP ${qkv_FP}
