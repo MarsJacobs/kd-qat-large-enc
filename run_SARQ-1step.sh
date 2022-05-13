@@ -26,7 +26,7 @@ index_ratio=0.01
 map=0
 
 #===========================================================#
-bert=$7
+bert=$3
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
 weight_bits=2 # 8, 2
@@ -38,8 +38,8 @@ stop_grad=0
 qk_FP=0
 
 # Logging Option
-exp_name=1SB_I
-step1_option=map
+exp_name=1SB_LSM
+step1_option=LSM
 neptune=1
 save_quantized_model=1
 
@@ -52,17 +52,17 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 
-attn_distill=$3
-attnmap_distill=$4
-context_distill=$5
-output_distill=$6
+attn_distill=0
+attnmap_distill=0
+context_distill=0
+output_distill=0
 
 word_distill=0
 val_distill=0
 
 # Teacher Intervention (TI)
 teacher_attnmap=0
-teacher_input=$9
+teacher_input=0
 layer_thres_num=15
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
@@ -110,6 +110,6 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --prob_log ${prob_log} \
 --teacher_input ${teacher_input} --teacher_attnmap ${teacher_attnmap} --layer_thres_num ${layer_thres_num} \
 --other_lr ${other_lr} \
---seed $8 \
+--seed $4 \
 --step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}

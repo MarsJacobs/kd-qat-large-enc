@@ -36,9 +36,12 @@
 # bash run_SARQ-1step.sh $1 $2 0 1 1 0 large
 # bash run_SARQ-1step.sh $1 $2 0 1 0 1 large # Output + Map
 
-for seed in 42 52 62 
+for seed in 42 52 62 72 82
 do
-    bash run_SARQ-1step.sh $1 $2 0 1 0 1 large ${seed} 1 # Output + Input Intervention
-    #bash run_SARQ-1step.sh $1 $2 0 0 0 1 large ${seed} 0 # Output
-    # bash run_SARQ-1step.sh $1 $2 1 0 0 0 large ${seed} 0 # Ternary
+    bash run_SARQ-1step.sh $1 $2 large ${seed} # Output + Input Intervention
+done
+
+for seed in 42 52 62 72 82
+do
+    bash run_SARQ-1step.sh $1 $2 base ${seed} # Output + Input Intervention
 done

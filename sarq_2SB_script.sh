@@ -13,7 +13,7 @@ seed=42
 # bash run_SARQ_step_2.sh $1 $2 1 0 1
 for seed in 42 52 62
 do
-bash run_SARQ_step_2.sh $1 $2 1 0 0 ${seed}
+bash run_SARQ_step_2.sh $1 $2 0 0 0 ${seed}
 # bash run_SARQ_step_2.sh $1 $2 0 1 0 ${seed}
 done
 # bash run_SARQ_step_2.sh $1 $2 1 1 0

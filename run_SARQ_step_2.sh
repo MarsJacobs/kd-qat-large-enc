@@ -38,7 +38,7 @@ qk_FP=0
 
 # Logging Option
 exp_name=step_2_map_ii
-step1_option=map
+step1_option=co
 neptune=1
 save_quantized_model=0
 
