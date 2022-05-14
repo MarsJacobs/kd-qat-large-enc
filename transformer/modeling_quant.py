@@ -758,8 +758,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         # loss = cls_loss + rep_loss + attmap_loss * coeff[0] + output_loss * coeff[1]
         loss += rep_loss_list[0] # Embedding Loss
         loss += cls_loss
-
-        coeff = self.softmax(self.coeff/0.4)
+        coeff = self.softmax(self.coeff/self.config.sm_temp)
         for i in range(self.config.num_hidden_layers):
               # map_coeff = torch.sigmoid(self.coeff[i])
               # output_coeff = 1 - map_coeff

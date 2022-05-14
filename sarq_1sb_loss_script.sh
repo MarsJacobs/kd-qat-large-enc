@@ -40,7 +40,7 @@
 # do
 #     bash run_SARQ-1step.sh $1 $2 large ${seed} # Output + Input Intervention
 # done
-for temp in 0.45 0.5 0.6
+for temp in 0.3 0.45 0.5 0.6
 do 
     echo "LSM Test $2 task temp=$temp "
     for seed in 42 52 62 
