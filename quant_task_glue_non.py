@@ -602,6 +602,11 @@ def main():
                         type=float,
                         help="PACT Clip Value Weight Decay")
 
+    parser.add_argument("--sm_temp",
+                        default=0.4,
+                        type=float,
+                        help="LSM Temperature Value")
+
     parser.add_argument("--index_ratio",
                         default=0.05,
                         type=float,
@@ -1048,6 +1053,7 @@ def main():
                                                 qk_FP = args.qk_FP,
                                                 qkv_FP = args.qkv_FP,
                                                 map=args.map,
+                                                sm_temp=args.sm_temp,
                                                 act_method = args.act_method
                                                 )
     

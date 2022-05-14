@@ -36,12 +36,15 @@
 # bash run_SARQ-1step.sh $1 $2 0 1 1 0 large
 # bash run_SARQ-1step.sh $1 $2 0 1 0 1 large # Output + Map
 
-for seed in 42 52 62 72 82
-do
-    bash run_SARQ-1step.sh $1 $2 large ${seed} # Output + Input Intervention
-done
-
-for seed in 42 52 62 72 82
-do
-    bash run_SARQ-1step.sh $1 $2 base ${seed} # Output + Input Intervention
+# for seed in 42 52 62 
+# do
+#     bash run_SARQ-1step.sh $1 $2 large ${seed} # Output + Input Intervention
+# done
+for temp in 0.45 0.5 0.6
+do 
+    echo "LSM Test $2 task temp=$temp "
+    for seed in 42 52 62 
+    do
+        bash run_SARQ-1step.sh $1 $2 base ${seed} ${temp} # Output + Input Intervention
+    done
 done
