@@ -648,8 +648,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
         # self.coeff = nn.Parameter(torch.zeros(config.num_hidden_layers))
         # self.coeff = nn.Parameter(torch.zeros(config.num_hidden_layers))
         # self.output_coeff = nn.Parameter(torch.ones(1)*2)
-        # self.coeff = nn.Parameter(torch.zeros(config.num_hidden_layers, 2))
         self.coeff = nn.Parameter(torch.zeros(config.num_hidden_layers, 2))
+        # self.coeff = nn.Parameter(torch.zeros(config.num_hidden_layers, 3))
         # self.coeff = nn.Parameter(torch.zeros(2))
         self.softmax = torch.nn.Softmax(dim=1)
 
@@ -661,7 +661,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 teacher_outputs=None,
                 seq_lengths=None):
         
-        encoded_layers, attention_scores, attention_probs, attention_values, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, teacher_probs=teacher_outputs)
+        encoded_layers, student_atts, attention_probs, attention_values, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, teacher_probs=teacher_outputs)
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
 
@@ -669,16 +669,18 @@ class BertForSequenceClassification(BertPreTrainedModel):
         # Learnable Loss Coefficient
         # ================================================================================ #
 
-        teacher_probs, teacher_values, teacher_reps, teacher_logits = teacher_outputs
+        teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts = teacher_outputs
 
         loss = 0.
         cls_loss = 0.
         output_loss = 0.
         attmap_loss = 0.
+        attscore_loss = 0.
         rep_loss = 0.
 
         output_loss_list = []
         map_loss_list = []
+        score_loss_list = []
         rep_loss_list = []
         map_coeff_list = []
         output_coeff_list = []
@@ -710,6 +712,18 @@ class BertForSequenceClassification(BertPreTrainedModel):
             mask[sent, :, :s, :s] = 1.0
         
         mask = mask.to("cuda")
+
+        for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):    
+                    
+            student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to("cuda"),
+                                        student_att)
+            teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to("cuda"),
+                                        teacher_att)
+
+            tmp_loss = MSELoss()(student_att, teacher_att)
+            attscore_loss += tmp_loss
+
+
         for i, (student_prob, teacher_prob) in enumerate(zip(attention_probs, teacher_probs)):            
                     
             # student_prob = student_prob["attn"]
@@ -755,28 +769,31 @@ class BertForSequenceClassification(BertPreTrainedModel):
             rep_loss += tmp_loss
 
         # coeff = self.softmax(self.coeff/0.3)
-        # loss = cls_loss + rep_loss + attmap_loss * coeff[0] + output_loss * coeff[1]
-        loss += rep_loss_list[0] # Embedding Loss
-        loss += cls_loss
-        coeff = self.softmax(self.coeff/self.config.sm_temp)
-        for i in range(self.config.num_hidden_layers):
-              # map_coeff = torch.sigmoid(self.coeff[i])
-              # output_coeff = 1 - map_coeff
-
-              
-              # Logging Coeff
-            #   map_coeff_list.append(map_coeff)
-            #   output_coeff_list.append(output_coeff)
-
-              # layer_loss = rep_loss_list[i+1]*0.5 + map_coeff*map_loss_list[i] + output_coeff*output_loss_list[i]
-              layer_loss = rep_loss_list[i+1] + map_loss_list[i]*coeff[i][0] + output_loss_list[i]*coeff[i][1]
-              loss += layer_loss
-
         
-        
-        # loss = cls_loss + rep_loss + attmap_loss
 
-        return logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, coeff
+        if self.config.loss_SM:
+            loss += rep_loss_list[0] # Embedding Loss
+            loss += cls_loss
+            
+            coeff = self.softmax(self.coeff/self.config.sm_temp)
+            # loss = cls_loss + rep_loss + attmap_loss * coeff[0] + output_loss * coeff[1]
+            for i in range(self.config.num_hidden_layers):
+                # map_coeff = torch.sigmoid(self.coeff[i])
+                # output_coeff = 1 - map_coeff
+
+                
+                # Logging Coeff
+                #   map_coeff_list.append(map_coeff)
+                #   output_coeff_list.append(output_coeff)
+
+                # layer_loss = rep_loss_list[i+1]*0.5 + map_coeff*map_loss_list[i] + output_coeff*output_loss_list[i]
+                layer_loss = rep_loss_list[i+1] + map_loss_list[i]*coeff[i][0] + output_loss_list[i]*coeff[i][1] #  + output_loss_list[i]*0.5
+                loss += layer_loss
+        else:
+            loss = 0.
+            coeff = None
+
+        return logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, coeff, (attention_values, attention_probs, encoded_layers, output_loss_list, map_loss_list)
         # if labels is not None:
         #     loss_fct = nn.CrossEntropyLoss()
         #     loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))

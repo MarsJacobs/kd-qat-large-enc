@@ -27,6 +27,7 @@ map=0
 
 #===========================================================#
 bert=$3
+loss_SM=$6
 sm_temp=$5
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
@@ -39,7 +40,7 @@ stop_grad=0
 qk_FP=0
 
 # Logging Option
-exp_name=1SB_LSM
+exp_name=1SB
 step1_option=LSM
 neptune=1
 save_quantized_model=1
@@ -54,9 +55,9 @@ pred_distill=1
 rep_distill=1
 
 attn_distill=0
-attnmap_distill=0
+attnmap_distill=$7
 context_distill=0
-output_distill=0
+output_distill=$8
 
 word_distill=0
 val_distill=0
@@ -111,6 +112,6 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --prob_log ${prob_log} \
 --teacher_input ${teacher_input} --teacher_attnmap ${teacher_attnmap} --layer_thres_num ${layer_thres_num} \
 --other_lr ${other_lr} \
---seed $4 --sm_temp ${sm_temp} \
+--seed $4 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
 --step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}

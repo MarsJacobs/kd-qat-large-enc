@@ -336,14 +336,13 @@ def do_eval(model, task_name, eval_dataloader,
 
             # teacher attnmap test
             if teacher_model is not None:
+                
                 # logits, _, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
                 
                 # # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
                 # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values, teacher_reps))
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
-            
-            
-                logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, coeff_list = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits), output_mode=output_mode, seq_lengths=seq_lengths)
+                logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, coeff_list, _  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
         
@@ -714,6 +713,10 @@ def main():
                         default =False, type=str2bool,
                         help="Q, K Parameter Quantization 4bit PACT")
     
+    parser.add_argument('--loss_SM',
+                        default =False, type=str2bool,
+                        help="per layer loss coeffficient Softmax")
+    
     parser.add_argument('--bert',
                         default ="base", type=str,
     )
@@ -748,7 +751,10 @@ def main():
     # ================================================================================ #
     
     # Exp Name
-    exp_name = args.exp_name + "_" +args.step1_option
+    exp_name = args.exp_name 
+
+    if args.loss_SM:
+        exp_name = exp_name + "_" + str(args.sm_temp)
     if args.attn_distill:
         exp_name += "_S"
     if args.attnmap_distill:
@@ -804,7 +810,7 @@ def main():
         if args.step1_option == "map":
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1")
         elif args.step1_option == "cc":
-            args.student_model = os.path.join(args.output_dir, task_name, "last", "sarq_step1_ci_c")
+            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_ci_c_C")
             # args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_c")
         elif args.step1_option == "co":
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_o")
@@ -1054,6 +1060,7 @@ def main():
                                                 qkv_FP = args.qkv_FP,
                                                 map=args.map,
                                                 sm_temp=args.sm_temp,
+                                                loss_SM=args.loss_SM,
                                                 act_method = args.act_method
                                                 )
     
@@ -1179,180 +1186,34 @@ def main():
             
             # student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
             # student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits), output_model=output_mode, seq_lengths=seq_lengths)
-            _, loss, cls_loss, rep_loss, output_loss, attmap_loss, coeff_list  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits), output_mode=output_mode, seq_lengths=seq_lengths)
+            _, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, coeff_list, student_zip  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
+                    
+            if n_gpu > 1:
+                loss = loss.mean()           
+
+            if not args.loss_SM:
+                loss_total = 0.
+                loss_total += cls_loss
+
+                if args.attn_distill:
+                    loss_total += attscore_loss
+                if args.rep_distill:
+                    loss_total += rep_loss
+                if args.attn_distill:
+                    loss_total += attmap_loss
+                if args.output_distill:
+                    loss_total += output_loss
+                
+                loss = loss_total
             
+
             l_cls_loss.update(cls_loss.item())
             l_attmap_loss.update(attmap_loss.item())
+            l_att_loss.update(attscore_loss.item())
             l_output_loss.update(output_loss.item())
             l_loss.update(loss.item())
             l_rep_loss.update(rep_loss.item())
-
-            # l_map_coeff.update(coeff[0].item())
-            # l_output_coeff.update(coeff[1].item())
-
-            # if args.gt_loss:
-
-            #     if output_mode == "classification":
-            #         lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
-            #         loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
-            #     elif output_mode == "regression":
-            #         loss = loss_mse(student_logits, teacher_logits)
-                
-            #     l_gt_loss.update(loss.item())
-
-            # if args.pred_distill:
-                
-            #     if output_mode == "classification":
-            #         cls_loss = soft_cross_entropy(student_logits,teacher_logits)
-            #     elif output_mode == "regression":
-            #         cls_loss = loss_mse(student_logits, teacher_logits)
-            
-            #     l_cls_loss.update(cls_loss.item())
-            #     cls_loss = cls_loss * args.cls_coeff
-            
-
-            # if args.attnmap_distill:
-                
-            #     BATCH_SIZE = student_probs[0].shape[0]
-            #     NUM_HEADS = student_probs[0].shape[1]
-            #     MAX_SEQ = student_probs[0].shape[2]
-                
-            #     mask = torch.zeros(BATCH_SIZE, NUM_HEADS, MAX_SEQ, MAX_SEQ, dtype=torch.float32)
-            #     mask_seq = []
-                
-            #     for sent in range(BATCH_SIZE):
-            #         s = seq_lengths[sent]
-            #         mask[sent, :, :s, :s] = 1.0
-                
-            #     mask = mask.to(device)
-
-            #     for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)):            
                     
-            #         # student_prob = student_prob["attn"]
-            #         # teacher_prob = teacher_prob["attn"]
-
-            #         # KLD(teacher || student)
-            #         # = sum (p(t) log p(t)) - sum(p(t) log p(s))
-            #         # = (-entropy) - (-cross_entropy)
-                    
-            #         student = torch.clamp_min(student_prob, 1e-8)
-            #         teacher = torch.clamp_min(teacher_prob, 1e-8)
-
-            #         # p(t) log p(s) = negative cross entropy
-            #         neg_cross_entropy = teacher * torch.log(student) * mask
-            #         neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
-            #         neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
-
-            #         # p(t) log p(t) = negative entropy
-            #         neg_entropy = teacher * torch.log(teacher) * mask
-            #         neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
-            #         neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
-
-            #         kld_loss = neg_entropy - neg_cross_entropy
-                    
-            #         # kld_loss_sum = torch.sum(kld_loss)
-            #         kld_loss_sum = torch.mean(kld_loss)
-    
-            #         # Other Option (Cosine Similarity, MSE Loss)
-            #         # attnmap_mse_loss = loss_mse(student, teacher)
-            #         #kld_loss_sum = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
-                    
-
-            #         #layer_attmap_loss[i].update(kld_loss_sum)
-            #         # attmap_loss += attnmap_mse_loss
-            #         attmap_loss += kld_loss_sum 
-                
-            #     l_attmap_loss.update(attmap_loss.item())
-            #     attmap_loss = args.attnmap_coeff*attmap_loss
-            
-            # # return context_layer, attention_scores, attention_prob, (context_layer_, attention_value)
-            # if args.val_distill:
-
-            #     BATCH_SIZE = student_values[0][0].shape[0]
-            #     NUM_HEADS = student_values[0][0].shape[1]
-            #     MAX_SEQ = student_values[0][0].shape[2]    
-            #     DIM = student_values[0][0].shape[3]
-                
-            #     # seq_sum = 0
-            #     # for sent in range(BATCH_SIZE):
-            #     #     seq_sum += input_mask[sent].sum()
-                
-            #     val_mask = input_mask.repeat(NUM_HEADS, DIM, 1, 1).permute(2, 0, 3, 1)
-            #     for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-            #         # tmp_loss = (loss_cos(student_value[0]*val_mask, teacher_value[0]*val_mask).sum() / (seq_sum * 16))
-            #         #tmp_loss = loss_mse(student_value[1]*val_mask, teacher_value[1]*val_mask)
-            #         # val_loss += (1-tmp_loss)
-            #         val_loss += tmp_loss
-                
-            #     l_val_loss.update(val_loss.item())
-            #     val_loss = args.val_coeff * val_loss
-
-            # if args.context_distill:
-                
-            #     for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-            #         tmp_loss = loss_mse(student_value[0], teacher_value[0]) # 1 : Attention Output 0 : Layer Context
-            #         context_loss += tmp_loss
-                
-            #     l_context_loss.update(context_loss.item())
-            #     context_loss = args.context_coeff * context_loss
-
-            # if args.output_distill:
-                
-            #     for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-            #         tmp_loss = loss_mse(student_value[1], teacher_value[1]) # 1 : Attention Output 0 : Layer Context
-            #         output_loss += tmp_loss
-                
-            #     l_output_loss.update(output_loss.item())
-            #     output_loss = args.output_coeff * output_loss
-                
-            # if args.attn_distill:
-
-            #     for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):    
-                    
-            #         student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to(device),
-            #                                     student_att)
-            #         teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to(device),
-            #                                     teacher_att)
-
-            #         if args.kd_layer_num != -1:
-            #             if i == args.kd_layer_num:
-            #                 tmp_loss = loss_mse(student_att, teacher_att)
-            #             else:   
-            #                 tmp_loss = loss_mse(student_att, teacher_att)
-            #                 tmp_loss = tmp_loss * 0
-            #         else:
-            #             tmp_loss = loss_mse(student_att, teacher_att)
-                    
-
-
-            #         #layer_att_loss[i].update(tmp_loss)
-            #         att_loss += tmp_loss 
-                    
-            #     l_att_loss.update(att_loss.item())
-            #     att_loss = args.att_coeff * att_loss
-
-            # if args.rep_distill:
-            #     for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
-                    
-            #         if args.kd_layer_num != -1:
-            #             if i == args.kd_layer_num:
-            #                 tmp_loss = loss_mse(student_rep, teacher_rep)
-            #             else:
-            #                 tmp_loss = loss_mse(student_rep, teacher_rep)
-            #                 tmp_loss = tmp_loss * 0
-            #         else:
-            #             tmp_loss = loss_mse(student_rep, teacher_rep)
-                   
-            #         #layer_rep_loss[i].update(tmp_loss)
-            #         rep_loss += tmp_loss
-
-            #     l_rep_loss.update(rep_loss.item())
-            #     rep_loss = args.rep_coeff * rep_loss
-                
-            
-            # loss += cls_loss + rep_loss + attmap_loss + att_loss + word_loss + val_loss + context_loss + output_loss
-            # l_loss.update(loss.item())
-            
             # Zero Step Loss Update
             if global_step == 0: 
                 if run is not None:           
@@ -1366,21 +1227,22 @@ def main():
                     
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
-                    # run[f"loss/layer_map_coeff"].log(value=coeff_list[0], step=global_step)
-                    # run[f"loss/layer_output_coeff"].log(value=coeff_list[1], step=global_step)
                     # for n, p in student_model.named_parameters():
                     #     if "clip_val" in n:
                     #         run[n].log(value=p, step=global_step)
+                    if args.loss_SM:
+                        # run[f"loss/layer_map_coeff"].log(value=coeff_list[0], step=global_step)
+                        # run[f"loss/layer_output_coeff"].log(value=coeff_list[1], step=global_step)
+                        for i in range(student_config.num_hidden_layers):
+                            run[f"loss/layer_{i}_map_coeff"].log(value=coeff_list[i][0], step=global_step)
+                            run[f"loss/layer_{i}_output_coeff"].log(value=coeff_list[i][1], step=global_step)
+                            # run[f"l_loss/layer_{i}_output"].log(value=student_zip[3][i], step=global_step)
+                            # run[f"l_loss/layer_{i}_map"].log(value=student_zip[4][i], step=global_step)
+                            # run[f"loss/layer_{i}_FFN_coeff"].log(value=coeff_list[i][2], step=global_step)
+ 
+            loss.backward()
 
-                    for i in range(student_config.num_hidden_layers):
-                        run[f"loss/layer_{i}_map_coeff"].log(value=coeff_list[i][0], step=global_step)
-                        run[f"loss/layer_{i}_output_coeff"].log(value=coeff_list[i][1], step=global_step)
-                        
-                        
-            if n_gpu > 1:
-                loss = loss.mean()
-
-            loss.backward()        
+            
             optimizer.step() 
             optimizer.zero_grad()
             
@@ -1423,18 +1285,21 @@ def main():
                     
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
 
-                    # run[f"loss/layer_map_coeff"].log(value=coeff_list[0], step=global_step)
-                    # run[f"loss/layer_output_coeff"].log(value=coeff_list[1], step=global_step)
+                    
                     # # Clip Value Logging (Scale Factor)
                     # for n, p in student_model.named_parameters():
                     #     if "clip_val" in n:
                     #         run[n].log(value=p, step=global_step)
                     
-                    for i in range(student_config.num_hidden_layers):
-                        run[f"loss/layer_{i}_map_coeff"].log(value=coeff_list[i][0], step=global_step)
-                        run[f"loss/layer_{i}_output_coeff"].log(value=coeff_list[i][1], step=global_step)
-                    
-
+                    if args.loss_SM:
+                        # run[f"loss/layer_map_coeff"].log(value=coeff_list[0], step=global_step)
+                        # run[f"loss/layer_output_coeff"].log(value=coeff_list[1], step=global_step)
+                        for i in range(student_config.num_hidden_layers):
+                            run[f"loss/layer_{i}_map_coeff"].log(value=coeff_list[i][0], step=global_step)
+                            run[f"loss/layer_{i}_output_coeff"].log(value=coeff_list[i][1], step=global_step)
+                            # run[f"l_loss/layer_{i}_output"].log(value=student_zip[3][i], step=global_step)
+                            # run[f"l_loss/layer_{i}_map"].log(value=student_zip[4][i], step=global_step)
+                            # run[f"loss/layer_{i}_FFN_coeff"].log(value=coeff_list[i][2], step=global_step)
                     # Attention Map Probability Logging (Using Sampled Test Dataset)
                     if args.prob_log:
 

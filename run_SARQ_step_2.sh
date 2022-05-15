@@ -25,7 +25,9 @@ index_ratio=0.001
 map=0
 
 #===========================================================#
-bert=large
+bert=$3
+loss_SM=1
+sm_temp=$4
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
 weight_bits=2 # 8, 2
@@ -37,10 +39,10 @@ stop_grad=0
 qk_FP=0
 
 # Logging Option
-exp_name=step_2_map_ii
-step1_option=co
+exp_name=step_2_cc
+step1_option=cc
 neptune=1
-save_quantized_model=0
+save_quantized_model=1
 
 prob_log=0
 log_metric=0
@@ -52,9 +54,9 @@ pred_distill=1
 rep_distill=1
 
 attn_distill=0
-attnmap_distill=$3
+attnmap_distill=0
 context_distill=0
-output_distill=$4
+output_distill=0
 
 word_distill=0
 val_distill=0
@@ -64,7 +66,7 @@ value_relation=0
 
 # Teacher Intervention (TI)
 teacher_attnmap=0
-teacher_input=$5
+teacher_input=0
 layer_thres_num=15
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
@@ -112,6 +114,6 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --prob_log ${prob_log} \
 --teacher_input ${teacher_input} --teacher_attnmap ${teacher_attnmap} --layer_thres_num ${layer_thres_num} \
 --other_lr ${other_lr} \
---seed $6 \
+--seed $5 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
 --step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP} 
