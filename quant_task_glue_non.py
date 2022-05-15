@@ -813,7 +813,7 @@ def main():
             args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_ci_c_C")
             # args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_c")
         elif args.step1_option == "co":
-            args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_o")
+            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_ci_O")
         elif args.step1_option == "three":
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1.5_ci_c")
             # args.student_model = os.path.join(args.output_dir, task_name, "last", "sarq_step1.5_ci_c_l")

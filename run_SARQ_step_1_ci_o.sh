@@ -42,7 +42,7 @@ qk_FP=0
 qkv_FP=1
 
 # Logging Option
-exp_name=sarq_step1_ci_c
+exp_name=sarq_step1_ci
 neptune=1
 save_quantized_model=1
 

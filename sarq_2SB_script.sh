@@ -6,11 +6,11 @@
 
 # STEP 1 PREPARATION
 bash run_SARQ_step_1_ci_o.sh $1 $2 base
-bash run_SARQ_step_1_ci_o.sh $1 $2 large
+# bash run_SARQ_step_1_ci_o.sh $1 $2 large
 
 # STEP 2 TRAINING                            
 for seed in 42 52 62
 do
 bash run_SARQ_step_2.sh $1 $2 base 0.4 ${seed}
-bash run_SARQ_step_2.sh $1 $2 large 0.4 ${seed}
+# bash run_SARQ_step_2.sh $1 $2 large 0.4 ${seed}
 done

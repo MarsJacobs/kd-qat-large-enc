@@ -40,7 +40,7 @@ qk_FP=0
 
 # Logging Option
 exp_name=step_2_cc
-step1_option=cc
+step1_option=co
 neptune=1
 save_quantized_model=1
 
