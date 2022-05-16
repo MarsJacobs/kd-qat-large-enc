@@ -58,7 +58,7 @@ attn_distill=0
 attnmap_distill=0
 word_distill=0
 val_distill=0
-context_distill=0
+context_distill=1
 output_distill=1
 
 # deprecated
