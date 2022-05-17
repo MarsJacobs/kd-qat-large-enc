@@ -27,8 +27,8 @@ map=0
 
 #===========================================================#
 bert=$3
-loss_SM=$6
-sm_temp=$5
+loss_SM=0
+sm_temp=0
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
 weight_bits=2 # 8, 2
@@ -55,9 +55,9 @@ pred_distill=1
 rep_distill=1
 
 attn_distill=0
-attnmap_distill=$7
+attnmap_distill=0
 context_distill=0
-output_distill=$8
+output_distill=1
 
 word_distill=0
 val_distill=0
