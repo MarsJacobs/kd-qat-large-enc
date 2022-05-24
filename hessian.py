@@ -26,6 +26,11 @@ import random
 
 from utils import group_product, group_add, normalization, get_params_grad, hessian_vector_product, orthnormal
 
+def soft_cross_entropy(predicts, targets):
+    student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
+    targets_prob = torch.nn.functional.softmax(targets, dim=-1)
+    return torch.sum((- targets_prob * student_likelihood), dim=-1).mean()
+
 
 class hessian():
     """
@@ -35,7 +40,7 @@ class hessian():
         iii) the estimated eigenvalue density
     """
 
-    def __init__(self, model, criterion, data=None, dataloader=None, cuda=True, input_zip = None):
+    def __init__(self, model, criterion, data=None, dataloader=None, cuda=True, input_zip = None, teacher_model = None):
         """
         model: the model that needs Hessain information
         criterion: the loss function
@@ -50,6 +55,9 @@ class hessian():
                                                          dataloader != None)
 
         self.model = model.eval()  # make model is in evaluation model
+        
+        if teacher_model is not None:
+            self.teacher_model = teacher_model.eval()
         self.criterion = criterion
 
         if data != None:
@@ -81,10 +89,19 @@ class hessian():
             #     ), self.targets.cuda()
 
             # if we only compute the Hessian information for a single batch data, we can re-use the gradients.
+            if teacher_model is not None:
+                with torch.no_grad():
+                    tc_outputs = self.teacher_model(self.inputs[0], self.inputs[1], self.inputs[2])
+                tc_logits = tc_outputs[0]
+
             outputs = self.model(self.inputs[0], self.inputs[1], self.inputs[2]) # MSKIM Only Use Logits
             outputs = outputs[0]     
-    
-            loss = self.criterion(outputs, self.targets)
+
+            if teacher_model is not None:
+                loss = soft_cross_entropy(outputs, tc_logits)
+            else:
+                loss = self.criterion(outputs, self.targets)
+
             loss.backward(create_graph=True)
 
         # this step is used to extract the parameters from the model

@@ -12,6 +12,10 @@ ffn_kl_maps
 *.pth
 mode_pths
 *.png
+*.pt
+hessian_value_pts
 *.txt
 .ipynb_checkpoints 
 notebook_results
+hessian_value_pts
+BERT_tiny_4l

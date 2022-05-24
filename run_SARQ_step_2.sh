@@ -25,9 +25,9 @@ index_ratio=0.001
 map=0
 
 #===========================================================#
-bert=$3
+bert=base
 loss_SM=0
-sm_temp=0.3
+sm_temp=0
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
 weight_bits=2 # 8, 2
@@ -39,9 +39,9 @@ stop_grad=0
 qk_FP=0
 
 # Logging Option
-exp_name=step_2_cc
-step1_option=co
-neptune=1
+exp_name=step_2
+step1_option=map
+neptune=0
 save_quantized_model=1
 
 prob_log=0
@@ -53,10 +53,10 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 
-attn_distill=0
-attnmap_distill=0
+attn_distill=1
+attnmap_distill=1
 context_distill=0
-output_distill=1
+output_distill=0
 
 word_distill=0
 val_distill=0
@@ -73,7 +73,7 @@ layer_thres_num=15
 training_type=qat_step2
 
 # Loss Coeff
-attnmap_coeff=0.1
+attnmap_coeff=1
 word_coeff=1
 cls_coeff=1
 att_coeff=1
@@ -87,7 +87,7 @@ aug_train=0
 aug_N=0
 
 learning_rate=2E-5
-other_lr=2E-5
+other_lr=$4
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 --bert ${bert} \
@@ -114,6 +114,6 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --prob_log ${prob_log} \
 --teacher_input ${teacher_input} --teacher_attnmap ${teacher_attnmap} --layer_thres_num ${layer_thres_num} \
 --other_lr ${other_lr} \
---seed $4 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
+--seed $3 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
 --step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP} 

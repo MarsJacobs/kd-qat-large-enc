@@ -25,6 +25,7 @@ import math
 import os
 
 import torch
+from torch.nn import MSELoss
 from torch import nn
 from torch.autograd import Variable
 from .configuration import BertConfig
@@ -733,34 +734,33 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 # KLD(teacher || student)
                 # = sum (p(t) log p(t)) - sum(p(t) log p(s))
                 # = (-entropy) - (-cross_entropy)
-                
                 student = torch.clamp_min(student_prob, 1e-8)
                 teacher = torch.clamp_min(teacher_prob, 1e-8)
 
                 # p(t) log p(s) = negative cross entropy
-                neg_cross_entropy = teacher * torch.log(student) * mask
-                neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
-                neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+                # neg_cross_entropy = teacher * torch.log(student) * mask
+                # neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                # neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
 
-                # p(t) log p(t) = negative entropy
-                neg_entropy = teacher * torch.log(teacher) * mask
-                neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
-                neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+                # # p(t) log p(t) = negative entropy
+                # neg_entropy = teacher * torch.log(teacher) * mask
+                # neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                # neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
 
-                kld_loss = neg_entropy - neg_cross_entropy
+                # kld_loss = neg_entropy - neg_cross_entropy
                 
-                # kld_loss_sum = torch.sum(kld_loss)
-                kld_loss_mean = torch.mean(kld_loss)
+                # # kld_loss_sum = torch.sum(kld_loss)
+                # kld_loss_mean = torch.mean(kld_loss)
 
                 # Other Option (Cosine Similarity, MSE Loss)
-                # attnmap_mse_loss = loss_mse(student, teacher)
-                #kld_loss_sum = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
+                # attnmap_mse_loss = MSELoss()(student, teacher)
+                attnmap_mse_loss = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
                 
 
                 #layer_attmap_loss[i].update(kld_loss_sum)
-                # attmap_loss += attnmap_mse_loss
-                map_loss_list.append(kld_loss_mean)
-                attmap_loss += kld_loss_mean
+                
+                # map_loss_list.append(kld_loss_mean)
+                attmap_loss += (1 - attnmap_mse_loss)
 
             # Rep Loss
             for i, (student_rep, teacher_rep) in enumerate(zip(encoded_layers, teacher_reps)):

@@ -50,51 +50,6 @@ def get_tensor_data(output_mode, features):
     tensor_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids,all_label_ids, all_seq_lengths)
     return tensor_data, all_label_ids
 
-def do_eval(model, task_name, eval_dataloader,
-            device, output_mode, eval_labels, num_labels, teacher_model=None):
-    eval_loss = 0
-    nb_eval_steps = 0
-    preds = []
-
-    for batch_ in tqdm(eval_dataloader, desc="Inference"):
-        batch_ = tuple(t.to(device) for t in batch_)
-        
-        with torch.no_grad():
-            input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch_
-
-            # teacher attnmap test
-            if teacher_model is not None: 
-                teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
-                logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, coeff_list, _  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
-            else:
-                logits, _, _, _, _, _, _, _, _ = model(input_ids, segment_ids, input_mask)
-        # create eval loss and other metric required by the task
-        if output_mode == "classification":
-            loss_fct = CrossEntropyLoss()
-            tmp_eval_loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
-        elif output_mode == "regression":
-            loss_fct = MSELoss()
-            tmp_eval_loss = loss_fct(logits.view(-1), label_ids.view(-1))
-
-        eval_loss += tmp_eval_loss.mean().item()
-        nb_eval_steps += 1
-        if len(preds) == 0:
-            preds.append(logits.detach().cpu().numpy())
-        else:
-            preds[0] = np.append(
-                preds[0], logits.detach().cpu().numpy(), axis=0)
-
-    eval_loss = eval_loss / nb_eval_steps
-
-    preds = preds[0]
-    if output_mode == "classification":
-        preds = np.argmax(preds, axis=1)
-    elif output_mode == "regression":
-        preds = np.squeeze(preds)
-    result = compute_metrics(task_name, preds, eval_labels.numpy())
-    result['eval_loss'] = eval_loss
-    return result
-
 def soft_cross_entropy(predicts, targets):
     student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
     targets_prob = torch.nn.functional.softmax(targets, dim=-1)
@@ -134,119 +89,168 @@ default_params = {
         "rte": {"max_seq_length": 128,"batch_size":16,"eval_step":5000} # 100
     }
 
-task_name = "cola"
-bert_size = "large"
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
-if bert_size == "large":
-    layer_num = 24
-    head_num = 16
-else: 
-    layer_num = 12
-    head_num = 12
+def main():
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task",
+                        default='cola',
+                        type=str,
+                        help="The input data dir. Should contain the .tsv files (or other data files) for the task.")
+    parser.add_argument("--bert",
+                        default='models',
+                        type=str,
+                        )
+    parser.add_argument("--file_name",
+                        default='file',
+                        type=str,
+                        )
+    parser.add_argument("--model_name",
+                        default='file',
+                        type=str,
+                        )
+    parser.add_argument("--quant_model_name",
+                        default='file',
+                        type=str,
+                        )
 
-model_dir = "models"
-output_dir = "output"
-
-if bert_size == "large":
-    model_dir = os.path.join(model_dir, "BERT_large")
-    output_dir = os.path.join(output_dir, "BERT_large")
-
-teacher_model_dir = os.path.join(model_dir,task_name)
-
-# Processor & Task Info
-processor = processors[task_name]()
-output_mode = output_modes[task_name]
-label_list = processor.get_labels()
-num_labels = len(label_list)
-
-if task_name in default_params:
-    batch_size = default_params[task_name]["batch_size"]
-    max_seq_length = default_params[task_name]["max_seq_length"]
-    eval_step = default_params[task_name]["eval_step"]
+    parser.add_argument('--init',
+                        default =True, type=str2bool,
+                        help="Whether to quantize Classifier Dense Layer")
     
-# Tokenizer
-tokenizer = BertTokenizer.from_pretrained(teacher_model_dir, do_lower_case=True)
+    args = parser.parse_args() 
+
+    task_name = args.task
+    bert_size = args.bert
+
+    if bert_size == "large":
+        layer_num = 24
+        head_num = 16
+    elif bert_size == "tiny_4":
+        layer_num = 4
+        head_num = 12
+    elif bert_size == "tiny_6":
+        layer_num = 6
+        head_num = 12
+    else: 
+        layer_num = 12
+        head_num = 12
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if bert_size == "large":
+        model_dir = os.path.join(model_dir, "BERT_large")
+        output_dir = os.path.join(output_dir, "BERT_large")
+
+    # Processor & Task Info
+    processor = processors[task_name]()
+    output_mode = output_modes[task_name]
+    label_list = processor.get_labels()
+    num_labels = len(label_list)
+
+    if task_name in default_params:
+        batch_size = default_params[task_name]["batch_size"]
+        max_seq_length = default_params[task_name]["max_seq_length"]
+        eval_step = default_params[task_name]["eval_step"]
+    
+    model_dir = "models"
+    output_dir = "output"
+
+    teacher_model_dir = os.path.join(model_dir,task_name)
+    # Tokenizer
+    tokenizer = BertTokenizer.from_pretrained(teacher_model_dir, do_lower_case=True)
 
 
-# Load Dataset
-data_dir = os.path.join("data",task_name)
-processed_data_dir = os.path.join(data_dir,'preprocessed')
+    # Load Dataset
+    data_dir = os.path.join("data",task_name)
+    processed_data_dir = os.path.join(data_dir,'preprocessed')
 
-train_examples = processor.get_train_examples(data_dir)
+    train_examples = processor.get_train_examples(data_dir)
 
-train_features = convert_examples_to_features(train_examples, label_list,
-                                max_seq_length, tokenizer, output_mode)
+    train_features = convert_examples_to_features(train_examples, label_list,
+                                    max_seq_length, tokenizer, output_mode)
 
-train_features = train_features[:int(len(train_features))]
-print(f"Num examples = {len(train_features)}")
+    train_features = train_features[:int(len(train_features))]
+    print(f"Num examples = {len(train_features)}")
 
-train_data, train_labels = get_tensor_data(output_mode, train_features)
-train_sampler = RandomSampler(train_data)
-train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
+    train_data, train_labels = get_tensor_data(output_mode, train_features)
+    train_sampler = RandomSampler(train_data)
+    train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
 
-seed=42
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-mse_func = MSELoss()
+    seed=42
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    mse_func = MSELoss()
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model_dir = "models"
-output_dir = "output"
+    if bert_size == "large":
+        model_dir = os.path.join(model_dir, "BERT_large")
+        output_dir = os.path.join(output_dir, "BERT_large")
 
-if bert_size == "large":
-    model_dir = os.path.join(model_dir, "BERT_large")
-    output_dir = os.path.join(output_dir, "BERT_large")
+    # ================================================================================  #
+    # Model Load
+    # ================================================================================ #
+    # teacher_model = BertForSequenceClassification.from_pretrained(teacher_model_dir, num_labels=num_labels)
+    # teacher_model.to(device)
+    # teacher_model.eval()
+    
+    
+    init_dir = os.path.join(model_dir,task_name) 
+    model_dir = os.path.join(output_dir, task_name, "exploration", args.model_name)
 
-student_model_dir = os.path.join(model_dir,task_name)
-teacher_model_dir = os.path.join(model_dir,task_name)
+    quant_model_dir = os.path.join(output_dir, task_name, "exploration", args.quant_model_name)
+    quant_config = BertConfig.from_pretrained(quant_model_dir)             
 
-quant_model_name = "1SB_map_O"
-sarq_model_name = "sarq_step1_ci_O"
+    if args.init:
+        model = QuantBertForSequenceClassification.from_pretrained(init_dir, config = quant_config, num_labels=num_labels)
+    else:
+        model = QuantBertForSequenceClassification.from_pretrained(model_dir, config = quant_config, num_labels=num_labels)
+    
+    model.to(device)
 
-quant_model_dir = os.path.join(output_dir, task_name, "exploration", quant_model_name)  
-sarq_model_dir = os.path.join(output_dir, task_name, "exploration", sarq_model_name)  
-normal_init_dir = os.path.join(model_dir,task_name)
+    print()
+    print("==> Load Model DONE")
+    print("==> Test Inference")
 
-quant_config = BertConfig.from_pretrained(quant_model_dir)             
+    if output_mode == "classification":
+        loss_fct = CrossEntropyLoss()
 
-normal_model = QuantBertForSequenceClassification.from_pretrained(normal_init_dir, config = quant_config, num_labels=num_labels)
-normal_model.to(device)
-normal_model.eval()
+    elif output_mode == "regression":
+        loss_fct = MSELoss()
 
-# sarq_model = QuantBertForSequenceClassification.from_pretrained(sarq_model_dir, config = quant_config, num_labels=num_labels)
-# sarq_model.to(device)
-# sarq_model.eval()
+    from hessian import hessian
+    from tqdm import tqdm
 
-print()
-print("==> Load Model DONE")
-print("==> Test Inference")
+    tc_max_eigens = []
+    for batch in tqdm(train_dataloader):
+        input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
+        hessian_comp = hessian(model, data=(input_ids, label_ids), criterion=loss_fct, cuda=True, input_zip = (input_ids, segment_ids, input_mask))
+        top_eigenvalues, top_eigenvector = hessian_comp.eigenvalues(top_n=3)
+        tc_max_eigens = tc_max_eigens + top_eigenvalues
 
-if output_mode == "classification":
-    loss_fct = CrossEntropyLoss()
+    file_name = "hessian_value_pts" + "/" + args.file_name + ".pt"
+    print(file_name)
+    torch.save(tc_max_eigens, file_name)
+    print("==> Model Eigen Value DONE!")
+    # st_max_eigens = []
+    # for batch in tqdm(train_dataloader):
+    #     input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
+    #     hessian_comp = hessian(student_model, data=(input_ids, label_ids), criterion=loss_fct, cuda=True)
+    #     top_eigenvalues, top_eigenvector = hessian_comp.eigenvalues(top_n=5)
+    #     st_max_eigens = st_max_eigens + top_eigenvalues
+    # print("==> Student Model Eigen Value DONE!")
 
-elif output_mode == "regression":
-    loss_fct = MSELoss()
 
-from hessian import hessian
-from tqdm import tqdm
-
-tc_max_eigens = []
-for batch in tqdm(train_dataloader):
-    input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
-    hessian_comp = hessian(normal_model, data=(input_ids, label_ids), criterion=loss_fct, cuda=True, input_zip = (input_ids, segment_ids, input_mask))
-    top_eigenvalues, top_eigenvector = hessian_comp.eigenvalues(top_n=3)
-    tc_max_eigens = tc_max_eigens + top_eigenvalues
-
-torch.save(tc_max_eigens, "new_normal_max_eigens.pt")
-print("==> Model Eigen Value DONE!")
-# st_max_eigens = []
-# for batch in tqdm(train_dataloader):
-#     input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
-#     hessian_comp = hessian(student_model, data=(input_ids, label_ids), criterion=loss_fct, cuda=True)
-#     top_eigenvalues, top_eigenvector = hessian_comp.eigenvalues(top_n=5)
-#     st_max_eigens = st_max_eigens + top_eigenvalues
-# print("==> Student Model Eigen Value DONE!")
+if __name__ == "__main__":
+    main()

@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler,Tensor
 from torch.nn import CrossEntropyLoss, MSELoss
 
 from transformer import BertForSequenceClassification,WEIGHTS_NAME, CONFIG_NAME
-from transformer.modeling_quant import BertForSequenceClassification as QuantBertForSequenceClassification
+from transformer.modeling_quant_loss import BertForSequenceClassification as QuantBertForSequenceClassification
 from transformer import BertTokenizer
 from transformer import BertAdam
 from transformer import BertConfig
@@ -771,9 +771,8 @@ def main():
     # logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | attnmap_word : {args.word_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
     logger.info(f'EXP SET: {exp_name}')
     logger.info(f"SEED: {args.seed}")
-    # logger.info(f"QK-FP : {args.qk_FP}")
-    # logger.info(f"STOP-GRAD : {args.stop_grad}")
-    # logger.info(f"Others LR : {args.other_lr}")
+    logger.info(f"QK-FP : {args.qk_FP}")
+    logger.info(f"STOP-GRAD : {args.stop_grad}")
 
     
     if args.teacher_input:
@@ -863,7 +862,7 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 200}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 50}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":8000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":20},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":100},
@@ -1116,6 +1115,7 @@ def main():
     # ================================================================================ #
     if n_gpu > 1:
         student_model = torch.nn.DataParallel(student_model)
+        
     param_optimizer = list(student_model.named_parameters())
 
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight', 'temperature']
@@ -1127,10 +1127,11 @@ def main():
     if args.task_name == "cola" and args.training_type == "qat_step2":
         args.learning_rate = 1E-4
 
-    {'params': [p for n, p in param_optimizer if any(nd in n for nd in coeff)], 'weight_decay': 0.0, 'lr':args.learning_rate * 50},
+    # {'params': [p for n, p in param_optimizer if any(nd in n for nd in coeff)], 'weight_decay': 0.0, 'lr':args.learning_rate * 50},
     optimizer_grouped_parameters = [
         {'params': [p for n, p in param_optimizer if not any(nd in n for nd in (no_decay+clip_decay+coeff))], 'weight_decay': 0.01},
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+        
         {'params': [p for n, p in param_optimizer if any(cv in n for cv in clip_decay)],\
         'weight_decay': args.clip_wd if pact_quantizer else 0, 'lr': args.learning_rate * args.lr_scaling}
     ]
