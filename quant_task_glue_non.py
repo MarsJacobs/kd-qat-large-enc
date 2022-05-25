@@ -342,7 +342,7 @@ def do_eval(model, task_name, eval_dataloader,
                 # # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
                 # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values, teacher_reps))
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
-                logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, _  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
+                logits, student_atts, student_reps, student_probs, student_values  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
         
@@ -1167,8 +1167,6 @@ def main():
     # Loss Init AverageMeter
     l_gt_loss = AverageMeter()
     l_attmap_loss = AverageMeter()
-    l_val_loss = AverageMeter()
-    l_context_loss = AverageMeter()
     l_att_loss = AverageMeter()
     l_rep_loss = AverageMeter()
     l_cls_loss = AverageMeter()
@@ -1222,12 +1220,14 @@ def main():
                     cls_loss = MSELoss()(student_logits, teacher_logits)
                 else:
                     cls_loss = soft_cross_entropy(student_logits,teacher_logits)
+                l_cls_loss.update(cls_loss.item())
             
             # Output Loss
             if args.output_distill:
                 for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
                     tmp_loss = MSELoss()(student_value[1], teacher_value[1]) # 1 : Attention Output 0 : Layer Context
                     output_loss += tmp_loss
+                l_output_loss.update(output_loss.item())
             
             # Attention Score Loss
             if args.attn_distill:
@@ -1240,6 +1240,7 @@ def main():
 
                     tmp_loss = MSELoss()(student_att, teacher_att)
                     attscore_loss += tmp_loss
+                l_att_loss.update(attscore_loss.item())
 
             # Attention Map Loss
             if args.attnmap_distill:
@@ -1292,23 +1293,18 @@ def main():
                     #layer_attmap_loss[i].update(kld_loss_sum)
                     # attmap_loss += attnmap_mse_loss
                     attmap_loss += kld_loss_mean
+                
+                l_attmap_loss.update(attmap_loss.item())
             
             # Rep Distill
             if args.rep_distill:
                 for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
                     tmp_loss = MSELoss()(student_rep, teacher_rep)
-                    rep_loss_list.append(tmp_loss)
                     rep_loss += tmp_loss
-            
-            # loss logging
-            l_cls_loss.update(cls_loss.item())
-            l_attmap_loss.update(attmap_loss.item())
-            l_att_loss.update(attscore_loss.item())
-            l_output_loss.update(output_loss.item())
-            l_loss.update(loss.item())
-            l_rep_loss.update(rep_loss.item())
+                l_rep_loss.update(rep_loss.item())
 
             loss += cls_loss + rep_loss + attmap_loss + output_loss + attscore_loss
+            l_loss.update(loss.item())
 
             if n_gpu > 1:
                 loss = loss.mean()           
