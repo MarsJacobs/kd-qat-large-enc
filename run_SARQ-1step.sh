@@ -26,7 +26,7 @@ index_ratio=0.01
 map=0
 
 #===========================================================#
-bert=$3
+bert=large
 loss_SM=0
 sm_temp=0
 quantizer=ternary # ternary, pact, lsq
@@ -54,10 +54,10 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 
-attn_distill=$5
-attnmap_distill=$6
+attn_distill=0
+attnmap_distill=1
 context_distill=0
-output_distill=0
+output_distill=1
 
 word_distill=0
 val_distill=0
@@ -88,9 +88,9 @@ learning_rate=2E-5
 other_lr=2E-5
 # ===========================================================#
 
-CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_name $2 --output_dir output --num_train_epochs $4 --bert ${bert} \
+CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 --bert ${bert} \
 --weight_bits ${weight_bits} --input_bits ${input_bits} --kd_layer_num ${kd_layer_num} \
---gpu 1 --quantize ${quantize} --act_quant ${act_quant} --weight_quant ${weight_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
+--gpu $3 --quantize ${quantize} --act_quant ${act_quant} --weight_quant ${weight_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
 --aug_train ${aug_train} \
 --output_distill ${output_distill} --context_distill ${context_distill} --val_distill ${val_distill} --word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} \

@@ -342,7 +342,7 @@ def do_eval(model, task_name, eval_dataloader,
                 # # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
                 # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values, teacher_reps))
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
-                logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, coeff_list, _  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
+                logits, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, _  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
         
@@ -1012,7 +1012,7 @@ def main():
     teacher_model.eval()
     
     if n_gpu > 1:
-        teacher_model = torch.nn.DataParallel(teacher_model, device_ids=range(n_gpu))
+        teacher_model = torch.nn.DataParallel(teacher_model)
     
     result = do_eval(teacher_model, task_name, eval_dataloader,
                     device, output_mode, eval_labels, num_labels)
@@ -1202,47 +1202,117 @@ def main():
             # tmp loss init
             att_loss = 0.
             attmap_loss = 0.
-            val_loss = 0.
-            context_loss = 0.
             rep_loss = 0.
             cls_loss = 0.
-            word_loss = 0.
+            attscore_loss = 0.
             output_loss = 0.
             loss = 0.
             
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
         
-            # student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
-            # student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits), output_model=output_mode, seq_lengths=seq_lengths)
-            _, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, coeff_list, student_zip  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
-                    
-            if n_gpu > 1:
-                loss = loss.mean()           
+            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits), output_mode=output_mode, seq_lengths=seq_lengths)
+            # _, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, student_zip  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
 
-            if not args.loss_SM:
-                loss_total = 0.
-                loss_total += cls_loss
-
-                if args.attn_distill:
-                    loss_total += attscore_loss
-                if args.rep_distill:
-                    loss_total += rep_loss
-                if args.attnmap_distill:
-                    loss_total += attmap_loss 
-                if args.output_distill:
-                    loss_total += output_loss
-                
-                loss = loss_total
+            # Pred Loss
+            if args.pred_distill:
+                if output_mode == "classification":
+                    cls_loss = soft_cross_entropy(student_logits,teacher_logits)
+                elif output_mode == "regression":
+                    cls_loss = MSELoss()(student_logits, teacher_logits)
+                else:
+                    cls_loss = soft_cross_entropy(student_logits,teacher_logits)
             
+            # Output Loss
+            if args.output_distill:
+                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
+                    tmp_loss = MSELoss()(student_value[1], teacher_value[1]) # 1 : Attention Output 0 : Layer Context
+                    output_loss += tmp_loss
+            
+            # Attention Score Loss
+            if args.attn_distill:
+                for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):    
+                            
+                    student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to("cuda"),
+                                                student_att)
+                    teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to("cuda"),
+                                                teacher_att)
 
+                    tmp_loss = MSELoss()(student_att, teacher_att)
+                    attscore_loss += tmp_loss
+
+            # Attention Map Loss
+            if args.attnmap_distill:
+            
+                BATCH_SIZE = student_probs[0].shape[0]
+                NUM_HEADS = student_probs[0].shape[1]
+                MAX_SEQ = student_probs[0].shape[2]
+                
+                mask = torch.zeros(BATCH_SIZE, NUM_HEADS, MAX_SEQ, MAX_SEQ, dtype=torch.float32)
+                mask_seq = []
+                
+                for sent in range(BATCH_SIZE):
+                    s = seq_lengths[sent]
+                    mask[sent, :, :s, :s] = 1.0
+                
+                mask = mask.to("cuda")
+
+                for i, (student_prob, teacher_prob) in enumerate(zip(student_probs, teacher_probs)):            
+                            
+                    # student_prob = student_prob["attn"]
+                    # teacher_prob = teacher_prob["attn"]
+
+                    # KLD(teacher || student)
+                    # = sum (p(t) log p(t)) - sum(p(t) log p(s))
+                    # = (-entropy) - (-cross_entropy)
+                    
+                    student = torch.clamp_min(student_prob, 1e-8)
+                    teacher = torch.clamp_min(teacher_prob, 1e-8)
+
+                    # p(t) log p(s) = negative cross entropy
+                    neg_cross_entropy = teacher * torch.log(student) * mask
+                    neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                    neg_cross_entropy = torch.sum(neg_cross_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                    # p(t) log p(t) = negative entropy
+                    neg_entropy = teacher * torch.log(teacher) * mask
+                    neg_entropy = torch.sum(neg_entropy, dim=-1)  # (b, h, s, s) -> (b, h, s)
+                    neg_entropy = torch.sum(neg_entropy, dim=-1) / seq_lengths.view(-1, 1)  # (b, h, s) -> (b, h)
+
+                    kld_loss = neg_entropy - neg_cross_entropy
+                    
+                    # kld_loss_sum = torch.sum(kld_loss)
+                    kld_loss_mean = torch.mean(kld_loss)
+
+                    # Other Option (Cosine Similarity, MSE Loss)
+                    # attnmap_mse_loss = loss_mse(student, teacher)
+                    #kld_loss_sum = torch.nn.functional.cosine_similarity(student, teacher, -1).mean()
+                    
+
+                    #layer_attmap_loss[i].update(kld_loss_sum)
+                    # attmap_loss += attnmap_mse_loss
+                    attmap_loss += kld_loss_mean
+            
+            # Rep Distill
+            if args.rep_distill:
+                for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
+                    tmp_loss = MSELoss()(student_rep, teacher_rep)
+                    rep_loss_list.append(tmp_loss)
+                    rep_loss += tmp_loss
+            
+            # loss logging
             l_cls_loss.update(cls_loss.item())
             l_attmap_loss.update(attmap_loss.item())
             l_att_loss.update(attscore_loss.item())
             l_output_loss.update(output_loss.item())
             l_loss.update(loss.item())
             l_rep_loss.update(rep_loss.item())
-                    
+
+            loss += cls_loss + rep_loss + attmap_loss + output_loss + attscore_loss
+
+            if n_gpu > 1:
+                loss = loss.mean()           
+                
             # Zero Step Loss Update
             if global_step == 0: 
                 if run is not None:           
@@ -1270,44 +1340,8 @@ def main():
                     else:
                         if run is not None:
                             run["metrics/corr"].log(value=result['corr'],step=global_step)
-                    # logger.info(f"Eval Result is {result['corr']}")
-                    # logger.info(f"Eval Result is {result['corr']}")
-
-                    # for n, p in student_model.named_parameters():
-                    #     if "clip_val" in n:
-                    #         run[n].log(value=p, step=global_step)
-                    if args.loss_SM:
-                        # run[f"loss/layer_map_coeff"].log(value=coeff_list[0], step=global_step)
-                        # run[f"loss/layer_output_coeff"].log(value=coeff_list[1], step=global_step)
-                        for i in range(student_config.num_hidden_layers):
-                            run[f"loss/layer_{i}_map_coeff"].log(value=coeff_list[i][0], step=global_step)
-                            run[f"loss/layer_{i}_output_coeff"].log(value=coeff_list[i][1], step=global_step)
-                            # run[f"l_loss/layer_{i}_output"].log(value=student_zip[3][i], step=global_step)
-                            # run[f"l_loss/layer_{i}_map"].log(value=student_zip[4][i], step=global_step)
-                            # run[f"loss/layer_{i}_FFN_coeff"].log(value=coeff_list[i][2], step=global_step)
  
             loss.backward()
-            
-            # Gradient Logging
-            # for n, p in student_model.named_parameters():
-            #     if not p.requires_grad:
-            #         continue
-            #     if "self.query.weight" in n:
-            #         layer_num = int(n.split(".")[3])
-            #         grad_dict[f"query_L{layer_num}"].append(p.grad.detach().clone().norm().item())
-            #     if "self.key.weight" in n:
-            #         layer_num = int(n.split(".")[3])
-            #         grad_dict[f"key_L{layer_num}"].append(p.grad.detach().clone().norm().item())
-            #     if "self.value.weight" in n:
-            #         layer_num = int(n.split(".")[3])
-            #         grad_dict[f"value_L{layer_num}"].append(p.grad.detach().clone().norm().item())
-            #     if "intermediate.dense.weight" in n:
-            #         layer_num = int(n.split(".")[3])
-            #         grad_dict[f"ffn_1_L{layer_num}"].append(p.grad.detach().clone().norm().item())
-            #     if "output.dense.weight" in n and not "attention" in n:
-            #         layer_num = int(n.split(".")[3])
-            #         grad_dict[f"ffn_2_L{layer_num}"].append(p.grad.detach().clone().norm().item())
-
             optimizer.step() 
             optimizer.zero_grad()
             
@@ -1514,4 +1548,36 @@ if __name__ == "__main__":
                 
                 l_word_loss.update(word_loss.item())
                 attmap_loss = args.word_coeff*attmap_loss
+
+                # Gradient Logging
+            # for n, p in student_model.named_parameters():
+            #     if not p.requires_grad:
+            #         continue
+            #     if "self.query.weight" in n:
+            #         layer_num = int(n.split(".")[3])
+            #         grad_dict[f"query_L{layer_num}"].append(p.grad.detach().clone().norm().item())
+            #     if "self.key.weight" in n:
+            #         layer_num = int(n.split(".")[3])
+            #         grad_dict[f"key_L{layer_num}"].append(p.grad.detach().clone().norm().item())
+            #     if "self.value.weight" in n:
+            #         layer_num = int(n.split(".")[3])
+            #         grad_dict[f"value_L{layer_num}"].append(p.grad.detach().clone().norm().item())
+            #     if "intermediate.dense.weight" in n:
+            #         layer_num = int(n.split(".")[3])
+            #         grad_dict[f"ffn_1_L{layer_num}"].append(p.grad.detach().clone().norm().item())
+            #     if "output.dense.weight" in n and not "attention" in n:
+            #         layer_num = int(n.split(".")[3])
+            #         grad_dict[f"ffn_2_L{layer_num}"].append(p.grad.detach().clone().norm().item())
+            # for n, p in student_model.named_parameters():
+                    #     if "clip_val" in n:
+                    #         run[n].log(value=p, step=global_step)
+                    # if args.loss_SM:
+                    #     # run[f"loss/layer_map_coeff"].log(value=coeff_list[0], step=global_step)
+                    #     # run[f"loss/layer_output_coeff"].log(value=coeff_list[1], step=global_step)
+                    #     for i in range(student_config.num_hidden_layers):
+                    #         run[f"loss/layer_{i}_map_coeff"].log(value=coeff_list[i][0], step=global_step)
+                    #         run[f"loss/layer_{i}_output_coeff"].log(value=coeff_list[i][1], step=global_step)
+                    #         # run[f"l_loss/layer_{i}_output"].log(value=student_zip[3][i], step=global_step)
+                    #         # run[f"l_loss/layer_{i}_map"].log(value=student_zip[4][i], step=global_step)
+                    #         # run[f"loss/layer_{i}_FFN_coeff"].log(value=coeff_list[i][2], step=global_step)
 '''
