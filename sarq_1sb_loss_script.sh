@@ -1,8 +1,11 @@
 
                            
-for seed in 42 # 52 62 
-do                                             
-    bash run_SARQ-1step.sh $1 $2 $3 3 1 1
-    # bash run_SARQ-1step.sh $1 $2 large ${seed} ${temp} 0 1 0 
-    # bash run_SARQ-1step.sh $1 $2 large ${seed} ${temp} 0 0 1
+for seed in 72 82 92 12 22 32
+do                             # S M C O              
+    bash run_SARQ-1step.sh $1 $2 1 0 0 0 $seed
+    bash run_SARQ-1step.sh $1 $2 0 1 0 0 $seed
+    bash run_SARQ-1step.sh $1 $2 0 0 1 0 $seed
+    bash run_SARQ-1step.sh $1 $2 0 0 0 1 $seed
+    bash run_SARQ-1step.sh $1 $2 0 1 0 1 $seed
+    bash run_SARQ-1step.sh $1 $2 0 1 1 0 $seed
 done

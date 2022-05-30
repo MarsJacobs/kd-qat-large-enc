@@ -328,7 +328,7 @@ def do_eval(model, task_name, eval_dataloader,
     nb_eval_steps = 0
     preds = []
 
-    for batch_ in tqdm(eval_dataloader, desc="Inference", mininterval=0.01, ascii=True, leave=False):
+    for batch_ in eval_dataloader:
         batch_ = tuple(t.to(device) for t in batch_)
         
         with torch.no_grad():
@@ -771,6 +771,7 @@ def main():
     # logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | attnmap_word : {args.word_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
     logger.info(f'EXP SET: {exp_name}')
     logger.info(f"SEED: {args.seed}")
+    logger.info(f'EXP SET: {exp_name}')
     # logger.info(f"QK-FP : {args.qk_FP}")
     # logger.info(f"STOP-GRAD : {args.stop_grad}")
     # logger.info(f"Others LR : {args.other_lr}")
@@ -817,12 +818,12 @@ def main():
     
     elif args.training_type == "qat_step2": 
         if args.step1_option == "map":
-            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_S_M")
+            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_TI_S_M")
         elif args.step1_option == "cc":
             args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_ci_c_C")
             # args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_c")
         elif args.step1_option == "co":
-            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_ci_C_O")
+            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_CI_C_O")
         elif args.step1_option == "three":
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1.5_ci_c")
             # args.student_model = os.path.join(args.output_dir, task_name, "last", "sarq_step1.5_ci_c_l")
@@ -1190,7 +1191,7 @@ def main():
         nb_tr_examples, nb_tr_steps = 0, 0
         student_config.layer_thres_num += 6*epoch_
 
-        for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True, leave=False):
+        for batch in train_dataloader:
             
             student_model.train()
             
@@ -1432,12 +1433,6 @@ def main():
                         
                     # logger.info(f"Eval Result is {result['corr']}")
 
-                # SARQ Step-1
-                if args.training_type == "qat_step1":
-                    if eval_score >= fp32_score:
-                        logger.info(f"{global_step}-step : {eval_score} >= {fp32_score}, Step-1 Finished...")
-                        return 
-
                 # Save Model
                 save_model = False
 
@@ -1504,6 +1499,13 @@ def main():
                         torch.save(quant_model.state_dict(), output_model_file)
                         model_to_save.config.to_json_file(output_config_file)
                         tokenizer.save_vocabulary(output_quant_dir)
+                
+                # SARQ Step-1
+                if args.training_type == "qat_step1":
+                    if eval_score >= fp32_score:
+                        logger.info(f"{global_step}-step : {eval_score} >= {fp32_score}, Step-1 Finished...")
+                        return 
+
     
 
     logger.info(f"==> Previous Best = {previous_best}")

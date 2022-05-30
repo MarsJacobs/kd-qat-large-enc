@@ -25,7 +25,7 @@ index_ratio=0.001
 map=0
 
 #===========================================================#
-bert=base
+bert=large
 loss_SM=0
 sm_temp=0
 quantizer=ternary # ternary, pact, lsq
@@ -40,9 +40,9 @@ qk_FP=0
 
 # Logging Option
 exp_name=step_2
-step1_option=map
+step1_option=$8
 neptune=0
-save_quantized_model=1
+save_quantized_model=0
 
 prob_log=0
 log_metric=0
@@ -53,10 +53,10 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 
-attn_distill=1
-attnmap_distill=1
-context_distill=0
-output_distill=0
+attn_distill=$4
+attnmap_distill=$5
+context_distill=$6
+output_distill=$7
 
 word_distill=0
 val_distill=0
@@ -87,7 +87,7 @@ aug_train=0
 aug_N=0
 
 learning_rate=2E-5
-other_lr=$4
+other_lr=2E-5
 # ===========================================================#
 
 CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 --bert ${bert} \
