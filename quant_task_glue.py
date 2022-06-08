@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import torch.nn.functional as F
+from utils_squad import *
 
 log_format = '%(asctime)s %(message)s'
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
@@ -397,6 +398,7 @@ def main():
                         default=None,
                         type=str,
                         help="The models directory.")
+
     parser.add_argument("--task_name",
                         default='sst-2',
                         type=str,

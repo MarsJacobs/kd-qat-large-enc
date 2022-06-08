@@ -687,10 +687,10 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         attention_mask=None,
         start_positions=None,
         end_positions=None,
-        teacher_probs=None
+        teacher_outputs=None
     ):
         sequence_output, att_output, attention_probs, attention_values, pooled_output = self.bert(
-            input_ids,token_type_ids,attention_mask, teacher_probs=teacher_probs)
+            input_ids,token_type_ids,attention_mask, teacher_probs=teacher_outputs)
 
         last_sequence_output = sequence_output[-1]
 

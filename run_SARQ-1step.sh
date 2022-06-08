@@ -40,7 +40,7 @@ stop_grad=0
 qk_FP=0
 
 # Logging Option
-exp_name=1SB
+exp_name=1SB_no_rep
 step1_option=LSM
 neptune=1
 save_quantized_model=1
@@ -52,7 +52,7 @@ log_map=0
 # Distill Option
 gt_loss=0
 pred_distill=1
-rep_distill=1
+rep_distill=0
 
 attn_distill=$3
 attnmap_distill=$4
