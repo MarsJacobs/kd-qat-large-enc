@@ -892,7 +892,7 @@ def _compute_softmax(scores):
 
 def do_eval(args,model, dataloader,features,examples,device,dev_dataset, teacher_model=None):
     all_results = []
-    for _,batch_ in tqdm(dataloader, desc="Inference", mininterval=0.01, ascii=True, leave=False):
+    for batch_ in tqdm(dataloader, desc="Inference", mininterval=0.01, ascii=True, leave=False):
         batch_ = tuple(t.to(device) for t in batch_)
         input_ids, input_mask, segment_ids, example_indices = batch_
         with torch.no_grad():

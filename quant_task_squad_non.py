@@ -212,6 +212,50 @@ def main():
                         type=int,
                         default=42,
                         help="random seed for initialization")
+    
+    parser.add_argument("--max_seq_length",
+                        default=384,
+                        type=int,
+                        help="The maximum total input sequence length after WordPiece tokenization. \n"
+                             "Sequences longer than this will be truncated, and sequences shorter \n"
+                             "than this will be padded.")
+    
+    parser.add_argument("--doc_stride", 
+                        default=128, 
+                        type=int,
+                        help="When splitting up a long document into chunks, how much stride to take between chunks.")
+    
+    parser.add_argument("--max_query_length", 
+                        default=64, 
+                        type=int,
+                        help="The maximum number of tokens for the question. Questions longer than this will "
+                             "be truncated to this length.")
+    
+    parser.add_argument("--n_best_size", 
+                        default=20, 
+                        type=int,
+                        help="The total number of n-best predictions to generate in the nbest_predictions.json "
+                             "output file.")
+
+    parser.add_argument("--max_answer_length", 
+                        default=30, 
+                        type=int,
+                        help="The maximum length of an answer that can be generated. This is needed because the start "
+                             "and end predictions are not conditioned on one another.")
+                        
+    parser.add_argument('--do_lower_case',
+                        #action='store_true',
+                        default=True,
+                        help="do lower case")
+
+    parser.add_argument("--verbose_logging", 
+                        default=0, 
+                        type=int)
+
+    parser.add_argument('--null_score_diff_threshold',
+                        type=float, 
+                        default=0.0,
+                        help="If null_score - best_non_null is greater than the threshold predict null.")
 
     parser.add_argument('--save_fp_model',
                         action='store_true',
@@ -525,9 +569,14 @@ def main():
     )
 
     parser.add_argument("--per_gpu_batch_size",
-                        default=16,
+                        default=8,
                         type=int,
                         help="Per GPU batch size for training.")
+    
+    parser.add_argument('--eval_step', 
+                        type=int, 
+                        default=3000,
+                        help="Evaluate every X training steps")
 
     args = parser.parse_args() 
     
@@ -668,9 +717,7 @@ def main():
     # ================================================================================  #
     # Dataset Setup (with DA)
     # ================================================================================ #
-
-    input_file = 'train-v2.0' if args.version_2_with_negative else 'train-v1.1'
-    input_file = os.path.join(args.data_dir,input_file)
+    args.data_dir = os.path.join(args.data_dir,args.task_name)
     processed_data_dir = os.path.join(args.data_dir, 'processed')
     
     try:
@@ -755,7 +802,7 @@ def main():
     if n_gpu > 1:
         teacher_model = torch.nn.DataParallel(teacher_model)
     
-    result = do_eval(args,teacher_model, eval_dataloader,eval_features,eval_examples,args.device, dev_dataset)
+    result = do_eval(args,teacher_model, eval_dataloader,eval_features,eval_examples, device, dev_dataset)
     fp_em,fp_f1 = result['exact_match'],result['f1']
     logger.info(f"Full precision teacher exact_match={fp_em},f1={fp_f1}")
     
@@ -797,7 +844,7 @@ def main():
                                                 act_method = args.act_method
                                                 )
     
-    student_model = QuantBertForQuestionAnswering.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
+    student_model = QuantBertForQuestionAnswering.from_pretrained(args.student_model, config = student_config)
     
     student_model.to(device)
 
@@ -863,6 +910,7 @@ def main():
     
     global_step = 0
     best_dev_acc = 0.0
+    best_dev_f1 = 0.0
     previous_best = None
     
     tr_loss = 0.
@@ -899,7 +947,7 @@ def main():
     #layer_attmap_loss = [ AverageMeter() for i in range(12) ]
     #layer_att_loss = [ AverageMeter() for i in range(12) ]
     #layer_rep_loss = [ AverageMeter() for i in range(13) ] # 12 Layers Representation, 1 Word Embedding Layer 
-
+    global_step = 0
     for epoch_ in range(int(args.num_train_epochs)):
         # logger.info("****************************** %d Epoch ******************************", epoch_)
         nb_tr_examples, nb_tr_steps = 0, 0
@@ -916,7 +964,7 @@ def main():
             seq_lengths = []
             for b in range(input_mask.shape[0]):
                 seq_lengths.append(input_mask[b].sum().item())
-            seq_lengths = torch.Tensor(seq_lengths).to(args.device)
+            seq_lengths = torch.Tensor(seq_lengths).to(device)
 
             # tmp loss init
             att_loss = 0.
@@ -930,7 +978,7 @@ def main():
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
         
-            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits), output_mode=output_mode, seq_lengths=seq_lengths)
+            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits))
             # _, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, student_zip  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
 
             # Pred Loss
@@ -972,7 +1020,7 @@ def main():
                 mask_seq = []
                 
                 for sent in range(BATCH_SIZE):
-                    s = seq_lengths[sent]
+                    s = int(seq_lengths[sent])
                     mask[sent, :, :s, :s] = 1.0
                 
                 mask = mask.to("cuda")
@@ -1055,17 +1103,18 @@ def main():
                     else:
                         if run is not None:
                             run["metrics/corr"].log(value=result['corr'],step=global_step)
- 
+
+            
             loss.backward()
             optimizer.step() 
             optimizer.zero_grad()
             
-            global_step += 1
+            
             save_model = False
             # ================================================================================  #
             #  Evaluation
             # ================================================================================ #
-
+            global_step += 1
             if global_step % args.eval_step == 0 or global_step == num_train_optimization_steps-1: # period or last step
                 # logger.info("***** Running evaluation *****")
                 
@@ -1077,23 +1126,28 @@ def main():
 
                 student_model.eval()
                 
-                result = do_eval(args,student_model, eval_dataloader,eval_features,eval_examples,args.device, dev_dataset, teacher_model=teacher_model)
+                result = do_eval(args,student_model, eval_dataloader,eval_features,eval_examples,device, dev_dataset, teacher_model=None)
                 em,f1 = result['exact_match'],result['f1']
                 logger.info(f'FP {fp_em}/{fp_f1}')
                 logger.info(f'{em}/{f1}')
-
-                run["metrics/acc_em"].log(value=em, step=global_step)
-                run["metrics/acc_f1"].log(value=f1, step=global_step)
-                run["metrics/acc_em and f1"].log(value=(f1+em)/2, step=global_step)
 
                 result['global_step'] = global_step
                 result['cls_loss'] = l_cls_loss.avg
                 result['att_loss'] = l_att_loss.avg
                 result['rep_loss'] = l_rep_loss.avg
                 result['loss'] = l_loss.avg
+
+                if f1 > best_dev_f1:
+                    previous_best = f"exact_match={em},f1={f1}"
+                    best_dev_f1 = f1
+                    save_model = True
                 
                 # Basic Logging (Training Loss, Clip Val)
                 if run is not None:
+
+                    run["metrics/acc_em"].log(value=em, step=global_step)
+                    run["metrics/acc_f1"].log(value=f1, step=global_step)
+                    run["metrics/acc_em and f1"].log(value=(f1+em)/2, step=global_step)
                     
                     run["loss/total_loss"].log(value=l_loss.avg, step=global_step)
                     run["loss/gt_loss_loss"].log(value=l_gt_loss.avg, step=global_step)
@@ -1120,7 +1174,7 @@ def main():
                     tokenizer.save_vocabulary(args.output_dir)
                 if args.save_quantized_model:
                     logger.info("******************** Save quantized model ********************")
-                    output_quant_dir = os.path.join(args.output_dir, 'quant')
+                    output_quant_dir = os.path.join(output_dir, 'exploration')
                     if not os.path.exists(output_quant_dir):
                         os.makedirs(output_quant_dir)
                     
@@ -1141,13 +1195,14 @@ def main():
                     torch.save(quant_model.state_dict(), output_model_file)
                     model_to_save.config.to_json_file(output_config_file)
                     tokenizer.save_vocabulary(output_quant_dir)
-                
-
-    
 
     logger.info(f"==> Previous Best = {previous_best}")
     logger.info(f"==> Last Result = {result}")
 
+    # Save Best Score
+    best_txt = os.path.join(output_quant_dir, "best_info.txt")
+    with open(best_txt, "w") as f_w:
+        f_w.write(previous_best)
 
 if __name__ == "__main__":
     main()

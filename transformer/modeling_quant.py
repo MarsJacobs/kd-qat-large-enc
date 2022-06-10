@@ -657,7 +657,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
                 token_type_ids=None,
                 attention_mask=None, 
                 labels=None,
-                output_mode=None,
                 teacher_outputs=None,
                 seq_lengths=None):
         

@@ -1510,7 +1510,11 @@ def main():
 
     logger.info(f"==> Previous Best = {previous_best}")
     logger.info(f"==> Last Result = {result}")
-
+    
+    # Save Best Score
+    best_txt = os.path.join(output_quant_dir, "best_info.txt")
+    with open(best_txt, "w") as f_w:
+        f_w.write(previous_best)
 
 if __name__ == "__main__":
     main()
