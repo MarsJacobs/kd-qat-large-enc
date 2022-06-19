@@ -26,7 +26,7 @@ index_ratio=0.01
 map=0
 
 #===========================================================#
-bert=large
+bert=$7
 loss_SM=0
 sm_temp=0
 quantizer=ternary # ternary, pact, lsq
@@ -40,7 +40,7 @@ stop_grad=0
 qk_FP=0
 
 # Logging Option
-exp_name=1SB_no_rep
+exp_name=1SB
 step1_option=LSM
 neptune=1
 save_quantized_model=1
@@ -52,12 +52,14 @@ log_map=0
 # Distill Option
 gt_loss=0
 pred_distill=1
-rep_distill=0
+rep_distill=1
 
-attn_distill=$3
-attnmap_distill=$4
-context_distill=$5
-output_distill=$6
+attn_distill=0
+attnmap_distill=$3
+context_distill=0
+output_distill=$4
+sa_output_distill=$5
+
 
 word_distill=0
 val_distill=0
@@ -78,7 +80,7 @@ att_coeff=1
 rep_coeff=1
 val_coeff=1
 context_coeff=1
-output_coeff=1
+output_coeff=0.5
 
 # DA Options
 aug_train=0
@@ -93,7 +95,7 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --gpu 1 --quantize ${quantize} --act_quant ${act_quant} --weight_quant ${weight_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \
 --aug_train ${aug_train} \
---output_distill ${output_distill} --context_distill ${context_distill} --val_distill ${val_distill} --word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} \
+--sa_output_distill $sa_output_distill --output_distill ${output_distill} --context_distill ${context_distill} --val_distill ${val_distill} --word_distill ${word_distill} --gt_loss ${gt_loss} --pred_distill ${pred_distill} --rep_distill ${rep_distill} --attn_distill ${attn_distill} --attnmap_distill ${attnmap_distill} \
 --output_coeff ${output_coeff} --context_coeff ${context_coeff} --val_coeff ${val_coeff} --attnmap_coeff ${attnmap_coeff} --cls_coeff ${cls_coeff} --att_coef ${att_coeff} --rep_coeff ${rep_coeff} --word_coeff ${word_coeff} \
 --training_type ${training_type} \
 --clipping ${clipping} \
@@ -112,6 +114,6 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --prob_log ${prob_log} \
 --teacher_input ${teacher_input} --teacher_attnmap ${teacher_attnmap} --layer_thres_num ${layer_thres_num} \
 --other_lr ${other_lr} \
---seed $7 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
+--seed $6 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
 --step1_option ${step1_option} \
 --learning_rate ${learning_rate} --parks ${parks} --stop_grad ${stop_grad} --qk_FP ${qk_FP}

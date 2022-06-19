@@ -1,4 +1,5 @@
 data
+tensor_files
 CIFAR10
 models
 plt_storage

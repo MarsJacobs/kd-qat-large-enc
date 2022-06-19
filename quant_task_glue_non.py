@@ -342,7 +342,7 @@ def do_eval(model, task_name, eval_dataloader,
                 # # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=teacher_probs)
                 # logits, _, _, _, _ = model(input_ids, segment_ids, input_mask, teacher_probs=(teacher_probs, teacher_values, teacher_reps))
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
-                logits, student_atts, student_reps, student_probs, student_values  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
+                logits, student_atts, student_reps, student_probs, student_values  = model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts))
             else:
                 logits, _, _, _, _ = model(input_ids, segment_ids, input_mask)
         
@@ -685,6 +685,10 @@ def main():
                         default =False, type=str2bool,
                         help="Context Value Distill Option")
     
+    parser.add_argument('--sa_output_distill',
+                        default =False, type=str2bool,
+                        help="Context Value Distill Option")
+    
     parser.add_argument('--gt_loss',
                         default =True, type=str2bool,
                         help="Ground Truth Option")
@@ -706,6 +710,10 @@ def main():
                         help="Teacher Intervention Option (Context)")
     
     parser.add_argument('--teacher_input',
+                        default =False, type=str2bool,
+                        help="Teacher Intervention Option (Input)")
+    
+    parser.add_argument('--norm_output',
                         default =False, type=str2bool,
                         help="Teacher Intervention Option (Input)")
     
@@ -763,6 +771,9 @@ def main():
         exp_name += "_C"
     if args.output_distill:
         exp_name += "_O"
+    if args.sa_output_distill:
+        exp_name += "_SA"
+    
     args.exp_name = exp_name
     
     # Print Setting Info
@@ -1095,10 +1106,10 @@ def main():
                 module.act_flag = False
                 module.weight_flag = False
         
-        # student_model.eval()
-        # result = do_eval(student_model, task_name, eval_dataloader,
-        #                             device, output_mode, eval_labels, num_labels, teacher_model=teacher_model)
-        # print(result)
+    # student_model.eval()
+    # result = do_eval(student_model, task_name, eval_dataloader,
+    #                             device, output_mode, eval_labels, num_labels, teacher_model=teacher_model)
+    # print(result)
         
         cv_initialize(student_model, train_dataloader, torch.Tensor([args.index_ratio]), device)    
         
@@ -1172,6 +1183,7 @@ def main():
     l_rep_loss = AverageMeter()
     l_cls_loss = AverageMeter()
     l_output_loss = AverageMeter()
+    l_sa_output_loss = AverageMeter()
     l_loss = AverageMeter()
     
     # grad_dict = dict()
@@ -1205,12 +1217,13 @@ def main():
             cls_loss = 0.
             attscore_loss = 0.
             output_loss = 0.
+            sa_output_loss = 0.
             loss = 0.
             
             with torch.no_grad():
                 teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
         
-            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits), output_mode=output_mode, seq_lengths=seq_lengths)
+            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits))
             # _, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, student_zip  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
 
             # Pred Loss
@@ -1226,10 +1239,21 @@ def main():
             # Output Loss
             if args.output_distill:
                 for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
+                    coeff = (i / student_config.num_hidden_layers) + 0.2
+                    # coeff = 1
                     tmp_loss = MSELoss()(student_value[1], teacher_value[1]) # 1 : Attention Output 0 : Layer Context
+
+                    tmp_loss = tmp_loss * coeff
                     output_loss += tmp_loss
                 l_output_loss.update(output_loss.item())
             
+            # SA Output Loss
+            if args.sa_output_distill:
+                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
+                    tmp_loss = MSELoss()(student_value[3], teacher_value[3]) # 1 : Attention Output 0 : Layer Context
+                    sa_output_loss += tmp_loss
+                l_sa_output_loss.update(sa_output_loss.item())
+
             # Attention Score Loss
             if args.attn_distill:
                 for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):    
@@ -1293,6 +1317,10 @@ def main():
 
                     #layer_attmap_loss[i].update(kld_loss_sum)
                     # attmap_loss += attnmap_mse_loss
+
+                    # Added for Coeff
+                    coeff = (1 - (i / student_config.num_hidden_layers)) + 0.2
+                    kld_loss_mean = kld_loss_mean * coeff
                     attmap_loss += kld_loss_mean
                 
                 l_attmap_loss.update(attmap_loss.item())
@@ -1304,7 +1332,7 @@ def main():
                     rep_loss += tmp_loss
                 l_rep_loss.update(rep_loss.item())
 
-            loss += cls_loss + rep_loss + attmap_loss + output_loss + attscore_loss
+            loss += cls_loss + rep_loss + attmap_loss + output_loss + sa_output_loss + attscore_loss
             l_loss.update(loss.item())
 
             if n_gpu > 1:
@@ -1353,9 +1381,9 @@ def main():
                 
                 # logger.info("{} step of {} steps".format(global_step, num_train_optimization_steps))
                 
-                # if previous_best is not None:
+                if previous_best is not None:
                     # logger.info(f"{fp32_performance}")
-                    # logger.info(f"==> Previous Best = {previous_best}")
+                    logger.info(f"==> Previous Best = {previous_best}")
 
                 student_model.eval()
                 
@@ -1377,6 +1405,7 @@ def main():
                     run["loss/rep_loss_loss"].log(value=l_rep_loss.avg, step=global_step)
                     run["loss/cls_loss_loss"].log(value=l_cls_loss.avg, step=global_step)
                     run["loss/output_loss_loss"].log(value=l_output_loss.avg, step=global_step)
+                    run["loss/sa_output_loss_loss"].log(value=l_sa_output_loss.avg, step=global_step)
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)

@@ -169,11 +169,23 @@ class BertAttention(nn.Module):
         super(BertAttention, self).__init__()
         self.self = BertSelfAttention(config, i)
         self.output = BertSelfOutput(config, i)
+        self.norm = BertNormOutput(config)
+        self.output_norm = False
+        
 
     def forward(self, input_tensor, attention_mask):
         self_output, layer_att, layer_probs, layer_context, value_layer = self.self(input_tensor, attention_mask)
         attention_output, self_output_hs = self.output(self_output, input_tensor)
-
+        
+        if self.output_norm:
+            norms_outputs = self.norm(
+                input_tensor,
+                layer_probs,
+                value_layer,
+                self.output.dense
+            )
+            return attention_output, layer_att, layer_probs, (layer_context, attention_output, value_layer, self_output_hs, norms_outputs)
+        
         return attention_output, layer_att, layer_probs, (layer_context, attention_output, value_layer, self_output_hs)
 
 
@@ -477,3 +489,57 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             return total_loss, att_output, sequence_output
 
         return logits, att_output, sequence_output, attention_probs, attention_values
+
+class BertNormOutput(nn.Module): # This class is added by Goro Kobayashi
+    def __init__(self, config):
+        super().__init__()
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+
+    def forward(self, hidden_states, attention_probs, value_layer, dense):
+        # hidden_states: (batch, seq_length, all_head_size)
+        # attention_probs: (batch, num_heads, seq_length, seq_length)
+        # value_layer: (batch, num_heads, seq_length, head_size)
+        # dense: nn.Linear(all_head_size, all_head_size)
+
+        with torch.no_grad():
+            # value_layer is converted to (batch, seq_length, num_heads, 1, head_size)
+            value_layer = value_layer.permute(0, 2, 1, 3).contiguous()
+            value_shape = value_layer.size()
+            value_layer = value_layer.view(value_shape[:-1] + (1, value_shape[-1],))
+
+            # dense weight is converted to (num_heads, head_size, all_head_size)
+            dense = dense.weight
+            dense = dense.view(self.all_head_size, self.num_attention_heads, self.attention_head_size)
+            dense = dense.permute(1, 2, 0).contiguous()
+            
+            # Make transformed vectors f(x) from Value vectors (value_layer) and weight matrix (dense).
+            transformed_layer = value_layer.matmul(dense)
+            transformed_shape = transformed_layer.size() #(batch, seq_length, num_heads, 1, all_head_size)
+            transformed_layer = transformed_layer.view(transformed_shape[:-2] + (transformed_shape[-1],)) # 16, 64, 16, 1024
+            transformed_layer = transformed_layer.permute(0, 2, 1, 3).contiguous() # batch, num_head, seq_length, all_head_size
+            transformed_shape = transformed_layer.size() #(batch, num_heads, seq_length, all_head_size)
+            transformed_norm = torch.norm(transformed_layer, dim=-1)
+            
+            # Make weighted vectors αf(x) from transformed vectors (transformed_layer) and attention weights (attention_probs).
+            weighted_layer = torch.einsum('bhks,bhsd->bhksd', attention_probs, transformed_layer) #(batch, num_heads, seq_length, seq_length, all_head_size)
+            weighted_norm = torch.norm(weighted_layer, dim=-1)
+
+            # Sum each αf(x) over all heads: (batch, seq_length, seq_length, all_head_size)
+            summed_weighted_layer = weighted_layer.sum(dim=1)
+
+            # Calculate L2 norm of summed weighted vectors: (batch, seq_length, seq_length)
+            summed_weighted_norm = torch.norm(summed_weighted_layer, dim=-1)
+
+            del transformed_shape
+            
+            # outputs: ||f(x)||, ||αf(x)||, ||Σαf(x)||
+            outputs = (transformed_norm,
+                    weighted_norm,
+                    summed_weighted_norm,
+                    transformed_layer,
+                    )
+            del weighted_layer, summed_weighted_layer
+        torch.cuda.empty_cache()
+        return outputs
