@@ -1226,6 +1226,16 @@ def main():
             student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits))
             # _, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, student_zip  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
 
+            if args.gt_loss:
+
+                if output_mode == "classification":
+                    lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
+                    loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
+                elif output_mode == "regression":
+                    loss = loss_mse(student_logits, teacher_logits)
+                
+                l_gt_loss.update(loss.item())
+                
             # Pred Loss
             if args.pred_distill:
                 if output_mode == "classification":
@@ -1381,9 +1391,9 @@ def main():
                 
                 # logger.info("{} step of {} steps".format(global_step, num_train_optimization_steps))
                 
-                if previous_best is not None:
+                # if previous_best is not None:
                     # logger.info(f"{fp32_performance}")
-                    logger.info(f"==> Previous Best = {previous_best}")
+                    # logger.info(f"==> Previous Best = {previous_best}")
 
                 student_model.eval()
                 
