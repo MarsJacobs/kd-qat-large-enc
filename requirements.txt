@@ -9,3 +9,6 @@ numpy
 neptune-client
 tensorboard
 torchmetrics
+transformers
+seaborn
+IPython
