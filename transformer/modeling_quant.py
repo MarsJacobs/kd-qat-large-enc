@@ -223,7 +223,7 @@ class BertSelfAttention(nn.Module):
     
         if self.config.teacher_attnmap and teacher_probs is not None:
             # Teacher Map Insertion
-            tc_attention_probs = teacher_probs[0][self.i]
+            tc_attention_probs = teacher_probs[-2][self.i]
             attention_prob = st_attention_probs # attention probs to return (for append)
             attention_probs = self.dropout(tc_attention_probs)
 

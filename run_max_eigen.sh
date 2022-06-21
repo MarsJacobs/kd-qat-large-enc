@@ -5,7 +5,7 @@ bert=base
 # Ternary : 1SB_S 1SB : 1SB_S_M 2SB : step_2_S_M
 model_name=sarq_step1_S_M
 quant_model_name=1SB_O
-init=$3
+init=0
 
 CUDA_VISIBLE_DEVICES=$1 python max_eigenvalue.py --task $2 \
                                                 --bert $bert \
