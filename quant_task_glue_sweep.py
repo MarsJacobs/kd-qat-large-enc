@@ -779,7 +779,7 @@ def main():
     # Print Setting Info
     # logger.info(f"DISTILL1 => rep : {args.rep_distill} | cls : {args.pred_distill} | atts : {args.attn_distill} | attmap : {args.attnmap_distill} | tc_insert : {args.teacher_attnmap} | gt_loss : {args.gt_loss}")
     # logger.info(f"DISTILL2 => S : {args.attn_distill} M : {args.attnmap_distill} C: {args.context_distill}  O: {args.output_distill}")
-    # logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | attnmap_word : {args.word_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
+    logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | output : {args.output_coeff}")
     logger.info(f'EXP SET: {exp_name}')
     logger.info(f"SEED: {args.seed}")
     logger.info(f'EXP SET: {exp_name}')
@@ -878,7 +878,7 @@ def main():
         "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 200}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":8000},
         "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":20},
-        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":100},
+        "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":800},
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
         "qnli": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
@@ -1341,7 +1341,7 @@ def main():
                 l_rep_loss.update(rep_loss.item())
             
             output_loss = output_loss * args.output_coeff
-            attmap_loss = attmap_loss * (1 - args.output_coeff)
+            attmap_loss = attmap_loss * args.attnmap_coeff
 
             loss += cls_loss + rep_loss + attmap_loss + output_loss + sa_output_loss + attscore_loss
             l_loss.update(loss.item())
