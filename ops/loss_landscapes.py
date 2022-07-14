@@ -82,7 +82,7 @@ def get_loss_landscape(model, n_ff, dataset, transform=None,
         gs = [{k: r * bs[k] for k in bs} for r, bs in zip(ratio, bases)]
         gs = {k: torch.sum(torch.stack([g[k] for g in gs]), dim=0) + ws[k] for k in gs[0]}
         model.load_state_dict(gs)
-        print("Grid: ", ratio, end=", ")
+        # print("Grid: ", ratio, end=", ")
         nll_meter = meters.AverageMeter("nll")
         # MSKIM
         for step, batch in enumerate(dataset):
@@ -102,8 +102,8 @@ def get_loss_landscape(model, n_ff, dataset, transform=None,
 
         # *metrics, cal_diag = tests.test(model, n_ff, dataset, transform=transform,
         #                                 cutoffs=cutoffs, bins=bins, verbose=verbose, period=period, gpu=gpu)
-        # l1, l2 = norm.l1(model, gpu).item(), norm.l2(model, gpu).item()
-        # metrics_grid[tuple(ratio)] = (l1, l2, metrics)
-        metrics_grid[tuple(ratio)] = (metrics)
+        l1, l2 = norm.l1(model, gpu).item(), norm.l2(model, gpu).item()
+        metrics_grid[tuple(ratio)] = (l1, l2, metrics)
+        # metrics_grid[tuple(ratio)] = (metrics)
 
     return metrics_grid
