@@ -85,6 +85,11 @@ def main():
                         type=str,
                         help="The name of the task to train.")
 
+    parser.add_argument("--bert_size",
+                        default='base',
+                        type=str,
+                        )
+
     args = parser.parse_args() 
 
     processors = {
@@ -126,7 +131,7 @@ def main():
 
     model_dir = "models"
     output_dir = "output"
-    bert_size = "base"
+    bert_size = args.bert_size
 
     if bert_size == "large":
         model_dir = os.path.join(model_dir, "BERT_large")
@@ -176,7 +181,7 @@ def main():
         x_min=-1.0 * scale, x_max=1.0 * scale, n_x=n, y_min=-1.0 * scale, y_max=1.0 * scale, n_y=n, gpu=gpu
     )
 
-    metrics_dir = os.path.join("lls_logs", "%s_%s_lls.csv" % (args.task_name, args.model_name))
+    metrics_dir = os.path.join("lls_logs", "%s_%s_$s_lls.csv" % (args.task_name, args.model_name, args.bert_size))
     metrics_list = [[*grid, metrics] for grid, metrics in metrics_grid.items()]
 
     with open(metrics_dir, 'w') as csvfile:

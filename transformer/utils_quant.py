@@ -366,7 +366,7 @@ class QuantizeLinear(nn.Linear):
         self.name = name
         self.map = map
         self.config = config
-        self.register_buffer('qweight', self.weight.clone().detach())
+        # self.register_buffer('qweight', self.weight.clone().detach())
 
         self.act_quantizer = None
         self.weight_quantizer= None
@@ -523,7 +523,7 @@ class QuantizeEmbedding(nn.Embedding):
         self.layerwise = False
         self.mean_scale = config.mean_scale
         self.config = config
-        self.register_buffer('qweight', self.weight.clone().detach())
+        # self.register_buffer('qweight', self.weight.clone().detach())
 
         self.clip_initialize()
 

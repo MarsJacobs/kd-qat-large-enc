@@ -12,4 +12,5 @@ CUDA_VISIBLE_DEVICES=$1 python max_eigenvalue.py --task $2 \
                                                 --file_name $file_name \
                                                 --model_name $model_name \
                                                 --quant_model_name $quant_model_name \
-                                                --init $init
+                                                --init $init \
+                                                --sample_N 0.1

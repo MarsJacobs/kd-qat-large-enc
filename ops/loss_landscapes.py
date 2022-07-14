@@ -51,9 +51,9 @@ def rand_basis(ws, gpu=True):
     return {k: torch.randn(size=v.shape, device="cuda" if gpu else None) for k, v in ws.items()}
 
 
-def create_bases(model, kws=None, gpu=True):
+def create_bases(model, kws=None, gpu=True, ws0=None):
     kws = [] if kws is None else kws
-    ws0 = copy.deepcopy(model.state_dict())
+    # ws0 = copy.deepcopy(model.state_dict())
     bases = [rand_basis(ws0, gpu) for _ in range(2)]  # Use two bases
     bases = [normalize_filter(bs, ws0) for bs in bases]
     bases = [ignore_bn(bs) for bs in bases]
@@ -70,7 +70,7 @@ def get_loss_landscape(model, n_ff, dataset, transform=None,
     model = copy.deepcopy(model)
     ws0 = copy.deepcopy(model.state_dict())
     kws = [] if kws is None else kws
-    bases = create_bases(model, kws, gpu) if bases is None else bases
+    bases = create_bases(model, kws, gpu, ws0=ws0) if bases is None else bases
     xs = np.linspace(x_min, x_max, n_x)
     ys = np.linspace(y_min, y_max, n_y)
     ratio_grid = np.stack(np.meshgrid(xs, ys), axis=0).transpose((1, 2, 0))
@@ -88,8 +88,8 @@ def get_loss_landscape(model, n_ff, dataset, transform=None,
         for step, batch in enumerate(dataset):
             batch = tuple(t.to("cuda") for t in batch)
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
-
-            student_logits, student_atts, student_reps, student_probs, student_values = model(input_ids, segment_ids, input_mask, teacher_outputs=None)
+            with torch.no_grad():
+                student_logits, student_atts, student_reps, student_probs, student_values = model(input_ids, segment_ids, input_mask, teacher_outputs=None)
             lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
             loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
             

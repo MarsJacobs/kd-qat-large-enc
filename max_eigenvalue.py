@@ -127,6 +127,10 @@ def main():
                         default =True, type=str2bool,
                         help="Whether to quantize Classifier Dense Layer")
     
+    parser.add_argument('--sample_N',
+                        default =1, type=float
+                        )
+    
     args = parser.parse_args() 
 
     task_name = args.task
@@ -179,7 +183,7 @@ def main():
     train_features = convert_examples_to_features(train_examples, label_list,
                                     max_seq_length, tokenizer, output_mode)
 
-    train_features = train_features[:int(len(train_features))]
+    train_features = train_features[:int(len(train_features) * args.sample_N)]
     print(f"Num examples = {len(train_features)}")
 
     train_data, train_labels = get_tensor_data(output_mode, train_features)
@@ -208,6 +212,7 @@ def main():
     
     init_dir = os.path.join(model_dir,task_name) 
     model_dir = os.path.join(output_dir, task_name, "exploration", args.model_name)
+    model_config = BertConfig.from_pretrained(model_dir)             
 
     quant_model_dir = os.path.join(output_dir, task_name, "exploration", args.quant_model_name)
     quant_config = BertConfig.from_pretrained(quant_model_dir)             
@@ -215,7 +220,7 @@ def main():
     if args.init:
         model = QuantBertForSequenceClassification.from_pretrained(init_dir, config = quant_config, num_labels=num_labels)
     else:
-        model = QuantBertForSequenceClassification.from_pretrained(model_dir, config = quant_config, num_labels=num_labels)
+        model = QuantBertForSequenceClassification.from_pretrained(model_dir, config = model_config, num_labels=num_labels)
     
     model.to(device)
 
