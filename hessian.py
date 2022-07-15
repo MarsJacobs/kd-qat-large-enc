@@ -102,6 +102,14 @@ class hessian():
             else:
                 loss = self.criterion(outputs, self.targets)
 
+            # Add L2 Norm 
+            l2_norm = torch.tensor(0.)
+            l2_norm = l2_norm.cuda()
+
+            for param in self.model.parameters():
+                l2_norm += torch.norm(param)
+            loss += l2_norm * 0.01
+
             loss.backward(create_graph=True)
 
         # this step is used to extract the parameters from the model

@@ -35,6 +35,22 @@ import seaborn as sns
 from torch.nn import CrossEntropyLoss, MSELoss
 import torch.nn.functional as F
 
+def soft_cross_entropy(predicts, targets):
+    student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
+    targets_prob = torch.nn.functional.softmax(targets, dim=-1)
+    return torch.sum((- targets_prob * student_likelihood), dim=-1).mean()
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def get_tensor_data(output_mode, features):
     if output_mode == "classification":
         all_label_ids = torch.tensor([f.label_id for f in features], dtype=torch.long)
@@ -140,6 +156,15 @@ def main():
                         default=0.01,
                         help="random seed for initialization")
     
+    parser.add_argument('--kd_loss',
+                        default=False, 
+                        type=str2bool,
+                        )
+
+    parser.add_argument('--kd_loss_type', 
+                        type=str,
+                        )
+    
 
     args = parser.parse_args() 
 
@@ -231,15 +256,21 @@ def main():
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
 
     # Build Model
+    if args.kd_loss:
+        teacher_model = BertForSequenceClassification.from_pretrained(teacher_model_dir, num_labels=num_labels)
+        teacher_model.to(device)
+        teacher_model.eval()
+    else:
+        teacher_model = None
+
     student_model_dir = os.path.join(output_dir, args.task_name, "exploration", args.model_name)   
     student_config = BertConfig.from_pretrained(student_model_dir)   
     student_model = QuantBertForSequenceClassification.from_pretrained(student_model_dir, config = student_config, num_labels=num_labels)
     student_model.to(device)
+    student_model.eval()
 
     percentage_index = len(train_dataloader.dataset) * args.data_percentage / batch_size
     print(f'percentage_index: {percentage_index}')
-
-    student_model.eval()
 
     # CSV File
     csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-eigens.csv")
@@ -277,16 +308,38 @@ def main():
             for step, batch in enumerate(train_dataloader):
                 if step < percentage_index:
                     
+                    tmp_loss = 0.
+                    loss = 0.
+
                     batch = tuple(t.to(device) for t in batch)
                     input_ids, input_mask, segment_ids, label_ids, _ = batch
                     
-                    logits, _, _, _, _ = student_model(input_ids, segment_ids, input_mask, teacher_outputs=None)
+                    if args.kd_loss:
+                        with torch.no_grad():
+                            teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
+        
+                    student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=None)
 
-                    if output_mode == "classification":
-                        lprobs = torch.nn.functional.log_softmax(logits, dim=-1)
-                        loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
-                    elif output_mode == "regression":
-                        loss = loss_mse(student_logits, teacher_logits)
+                    if args.kd_loss:
+                        if args.kd_loss_type == "pred":
+                            if output_mode == "classification":
+                                loss = soft_cross_entropy(student_logits,teacher_logits)
+                            elif output_mode == "regression":
+                                loss = MSELoss()(student_logits, teacher_logits)
+                            else:
+                                loss = soft_cross_entropy(student_logits,teacher_logits)
+
+                        elif args.kd_loss_type == "layer":
+                            for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
+                                tmp_loss = MSELoss()(student_rep, teacher_rep)
+                                loss += tmp_loss
+ 
+                    else:
+                        if output_mode == "classification":
+                            lprobs = torch.nn.functional.log_softmax(logits, dim=-1)
+                            loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
+                        elif output_mode == "regression":
+                            loss = loss_mse(student_logits, teacher_logits)
 
                     loss.backward(create_graph=True)
                     grads = [param.grad for param in model_block.parameters()]
