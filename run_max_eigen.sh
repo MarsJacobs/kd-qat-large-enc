@@ -6,6 +6,8 @@ bert=base
 model_name=$3
 quant_model_name=1SB_O
 init=0
+kd_loss=$5
+kd_loss_type=$6
 
 CUDA_VISIBLE_DEVICES=$1 python max_eigenvalue.py --task $2 \
                                                 --bert $bert \
@@ -13,4 +15,6 @@ CUDA_VISIBLE_DEVICES=$1 python max_eigenvalue.py --task $2 \
                                                 --model_name $model_name \
                                                 --quant_model_name $quant_model_name \
                                                 --init $init \
-                                                --sample_N 1
+                                                --kd_loss $kd_loss \
+                                                --kd_loss_type $kd_loss_type \
+                                                --sample_N 1 

@@ -273,7 +273,11 @@ def main():
     print(f'percentage_index: {percentage_index}')
 
     # CSV File
-    csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-eigens.csv")
+    if args.kd_loss:
+        csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-KD-{args.kd_loss_type}-eigens.csv")
+    else:
+        csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-eigens.csv")
+
     csv_file = open(csv_path, 'w', newline='')
     writer = csv.writer(csv_file, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)
     writer.writerow(['block', 'iters', 'max_eigenvalue'])
@@ -358,7 +362,7 @@ def main():
 
             # calculate raylay quotients
             lambdas = group_product(acc_Hv, v).item() / percentage_index
-            logger.info(f'block_{block_id}-lambda: {lambdas}')
+            # logger.info(f'block_{block_id}-lambda: {lambdas}')
             v = de_variable(acc_Hv)
 
             if abs((lambdas - lambda_old) / lambdas) < args.tol:

@@ -3,6 +3,8 @@ model_name=$3
 bert_size=$4
 data_percentage=0.05
 tol=0.01
+kd_loss=1
+kd_loss_type=$5
 
 for seed in 1 2 3 4 5 6 7 8 9 10
 do
@@ -11,6 +13,8 @@ do
                                                      --data_percentage $data_percentage \
                                                      --bert_size $bert_size \
                                                      --seed $seed \
-                                                     --tol $tol 
+                                                     --tol $tol \
+                                                     --kd_loss $kd_loss \
+                                                     --kd_loss_type $kd_loss_type
 done                        
 

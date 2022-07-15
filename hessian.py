@@ -23,7 +23,7 @@ import math
 from torch.autograd import Variable
 import numpy as np
 import random
-
+from torch.nn import CrossEntropyLoss, MSELoss
 from utils import group_product, group_add, normalization, get_params_grad, hessian_vector_product, orthnormal
 
 def soft_cross_entropy(predicts, targets):
@@ -40,7 +40,7 @@ class hessian():
         iii) the estimated eigenvalue density
     """
 
-    def __init__(self, model, criterion, data=None, dataloader=None, cuda=True, input_zip = None, teacher_model = None):
+    def __init__(self, model, criterion, data=None, dataloader=None, cuda=True, input_zip = None, teacher_model = None, kd_type = None):
         """
         model: the model that needs Hessain information
         criterion: the loss function
@@ -74,6 +74,8 @@ class hessian():
 
         # pre-processing for single batch case to simplify the computation.
 
+        loss = 0.
+        tmp_loss = 0.
         seed=42
         random.seed(seed)
         np.random.seed(seed)
@@ -93,12 +95,20 @@ class hessian():
                 with torch.no_grad():
                     tc_outputs = self.teacher_model(self.inputs[0], self.inputs[1], self.inputs[2])
                 tc_logits = tc_outputs[0]
+                tc_trms = tc_outputs[2]
 
             outputs = self.model(self.inputs[0], self.inputs[1], self.inputs[2]) # MSKIM Only Use Logits
             outputs = outputs[0]     
+            st_trms = outputs[2]
 
-            if teacher_model is not None:
+            if teacher_model is not None and kd_type == "trm":
+                for i, (student_rep, teacher_rep) in enumerate(zip(st_trms, tc_trms)):
+                        tmp_loss = MSELoss()(student_rep, teacher_rep)
+                        loss += tmp_loss
+
+            elif teacher_model is not None and kd_type == "pred":
                 loss = soft_cross_entropy(outputs, tc_logits)
+
             else:
                 loss = self.criterion(outputs, self.targets)
 

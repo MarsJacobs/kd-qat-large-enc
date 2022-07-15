@@ -126,10 +126,19 @@ def main():
     parser.add_argument('--init',
                         default =True, type=str2bool,
                         help="Whether to quantize Classifier Dense Layer")
+
+    parser.add_argument('--kd_loss',
+                        default =True, type=str2bool,
+                        )
+
+    parser.add_argument('--kd_loss_type',
+                        default ="pred", type=str,
+                        )
     
     parser.add_argument('--sample_N',
                         default =1, type=float
                         )
+
     
     args = parser.parse_args() 
 
@@ -205,10 +214,12 @@ def main():
     # ================================================================================  #
     # Model Load
     # ================================================================================ #
-    # teacher_model = BertForSequenceClassification.from_pretrained(teacher_model_dir, num_labels=num_labels)
-    # teacher_model.to(device)
-    # teacher_model.eval()
-    
+    if args.kd_loss:
+        teacher_model = BertForSequenceClassification.from_pretrained(teacher_model_dir, num_labels=num_labels)
+        teacher_model.to(device)
+        teacher_model.eval()
+    else:
+        teacher_model = None
     
     init_dir = os.path.join(model_dir,task_name) 
     model_dir = os.path.join(output_dir, task_name, "exploration", args.model_name)
@@ -240,13 +251,23 @@ def main():
     tc_max_eigens = []
     for batch in tqdm(train_dataloader):
         input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
-        hessian_comp = hessian(model, data=(input_ids, label_ids), criterion=loss_fct, cuda=True, input_zip = (input_ids, segment_ids, input_mask))
+        hessian_comp = hessian(model, data=(input_ids, label_ids), criterion=loss_fct, cuda=True, input_zip = (input_ids, segment_ids, input_mask), teacher_model=teacher_model, kd_type=args.kd_loss_type)
         top_eigenvalues, top_eigenvector = hessian_comp.eigenvalues(top_n=3)
         tc_max_eigens = tc_max_eigens + top_eigenvalues
 
-    file_name = "hessian_value_pts" + "/" + args.file_name + ".pt"
-    print(file_name)
-    torch.save(tc_max_eigens, file_name)
+    pt_folder_name = "hessian_value_pts"
+    file_name = args.file_name + ".pt" 
+
+    file_dir = os.path.join(pt_folder_name, file_name)
+
+    if not os.path.exists(pt_folder_name):
+        os.mkdir(pt_folder_name)          
+
+    print(file_dir)
+    try:
+        torch.save(tc_max_eigens, file_dir)
+    except:
+        import pdb; pdb.set_trace()
     print("==> Model Eigen Value DONE!")
     # st_max_eigens = []
     # for batch in tqdm(train_dataloader):
