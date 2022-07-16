@@ -7,6 +7,7 @@ from tqdm import tqdm
 import ops.norm as norm
 import ops.tests as tests
 import ops.meters as meters
+from torch.nn import CrossEntropyLoss, MSELoss
 
 def soft_cross_entropy(predicts, targets):
     student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
@@ -90,6 +91,9 @@ def get_loss_landscape(model, n_ff, dataset, transform=None,
         # print("Grid: ", ratio, end=", ")
         nll_meter = meters.AverageMeter("nll")
         # MSKIM
+
+        loss = 0.
+        tmp_loss = 0.
         for step, batch in enumerate(dataset):
             batch = tuple(t.to("cuda") for t in batch)
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch

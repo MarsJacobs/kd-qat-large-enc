@@ -209,8 +209,11 @@ def main():
         x_min=-1.0 * scale, x_max=1.0 * scale, n_x=n, y_min=-1.0 * scale, y_max=1.0 * scale, n_y=n, gpu=gpu,
         teacher_model=teacher_model, kd_type=args.kd_loss_type
     )
-
-    metrics_dir = os.path.join("lls_logs", "%s_%s_%s_lls.csv" % (args.task_name, args.model_name, args.bert_size))
+    
+    if args.kd_loss:
+        metrics_dir = os.path.join("lls_logs", "%s_%s_%s_KD_%s_lls.csv" % (args.task_name, args.model_name, args.bert_size, args.kd_loss_type))
+    else:
+        metrics_dir = os.path.join("lls_logs", "%s_%s_%s_lls.csv" % (args.task_name, args.model_name, args.bert_size))
     try:
         metrics_list = [[*grid, *metrics] for grid, metrics in metrics_grid.items()]
 
