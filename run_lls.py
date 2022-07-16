@@ -37,6 +37,16 @@ import ops.tests as tests
 import ops.datasets as datasets
 import ops.loss_landscapes as lls
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):
@@ -87,6 +97,16 @@ def main():
 
     parser.add_argument("--bert_size",
                         default='base',
+                        type=str,
+                        )
+    
+    parser.add_argument('--kd_loss',
+                        default=False, 
+                        type=str2bool,
+                        )
+
+    parser.add_argument('--kd_loss_type', 
+                        default="pred",
                         type=str,
                         )
 
@@ -166,6 +186,14 @@ def main():
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=batch_size)
 
     # Build Model
+
+    if args.kd_loss:
+        teacher_model = BertForSequenceClassification.from_pretrained(teacher_model_dir, num_labels=num_labels)
+        teacher_model.to(device)
+        teacher_model.eval()
+    else:
+        teacher_model = None
+
     student_model_dir = os.path.join(output_dir, args.task_name, "exploration", args.model_name)   
     student_config = BertConfig.from_pretrained(student_model_dir)   
     student_model = QuantBertForSequenceClassification.from_pretrained(student_model_dir, config = student_config, num_labels=num_labels)
@@ -178,7 +206,8 @@ def main():
     metrics_grid = lls.get_loss_landscape(
         student_model, 1, train_dataloader, transform=None,
         kws=["pos_embed", "relative_position"],
-        x_min=-1.0 * scale, x_max=1.0 * scale, n_x=n, y_min=-1.0 * scale, y_max=1.0 * scale, n_y=n, gpu=gpu
+        x_min=-1.0 * scale, x_max=1.0 * scale, n_x=n, y_min=-1.0 * scale, y_max=1.0 * scale, n_y=n, gpu=gpu,
+        teacher_model=teacher_model, kd_type=args.kd_loss_type
     )
 
     metrics_dir = os.path.join("lls_logs", "%s_%s_%s_lls.csv" % (args.task_name, args.model_name, args.bert_size))

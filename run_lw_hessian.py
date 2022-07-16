@@ -274,9 +274,9 @@ def main():
 
     # CSV File
     if args.kd_loss:
-        csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-KD-{args.kd_loss_type}-eigens.csv")
+        csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-KD-{args.kd_loss_type}-{args.bert_size}-eigens.csv")
     else:
-        csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-eigens.csv")
+        csv_path = os.path.join("layer_hessian_results", f"{args.task_name}-{args.data_percentage}-{args.seed}-{args.bert_size}-eigens.csv")
 
     csv_file = open(csv_path, 'w', newline='')
     writer = csv.writer(csv_file, delimiter=',', quotechar='|', quoting=csv.QUOTE_MINIMAL)

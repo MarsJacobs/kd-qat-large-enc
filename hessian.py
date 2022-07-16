@@ -103,8 +103,8 @@ class hessian():
 
             if teacher_model is not None and kd_type == "trm":
                 for i, (student_rep, teacher_rep) in enumerate(zip(st_trms, tc_trms)):
-                        tmp_loss = MSELoss()(student_rep, teacher_rep)
-                        loss += tmp_loss
+                    tmp_loss = MSELoss()(student_rep, teacher_rep)
+                    loss += tmp_loss
 
             elif teacher_model is not None and kd_type == "pred":
                 loss = soft_cross_entropy(outputs, tc_logits)

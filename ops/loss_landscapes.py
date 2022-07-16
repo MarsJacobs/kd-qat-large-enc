@@ -8,6 +8,11 @@ import ops.norm as norm
 import ops.tests as tests
 import ops.meters as meters
 
+def soft_cross_entropy(predicts, targets):
+    student_likelihood = torch.nn.functional.log_softmax(predicts, dim=-1)
+    targets_prob = torch.nn.functional.softmax(targets, dim=-1)
+    return torch.sum((- targets_prob * student_likelihood), dim=-1).mean()
+
 def normalize_filter(bs, ws):
     bs = {k: v.float() for k, v in bs.items()}
     ws = {k: v.float() for k, v in ws.items()}
@@ -65,7 +70,7 @@ def create_bases(model, kws=None, gpu=True, ws0=None):
 def get_loss_landscape(model, n_ff, dataset, transform=None,
                        bases=None, kws=None,
                        cutoffs=(0.0, 0.9), bins=np.linspace(0.0, 1.0, 11), verbose=False, period=10, gpu=True,
-                       x_min=-1.0, x_max=1.0, n_x=11, y_min=-1.0, y_max=1.0, n_y=11):
+                       x_min=-1.0, x_max=1.0, n_x=11, y_min=-1.0, y_max=1.0, n_y=11, teacher_model=None, kd_type=None):
     model = model.cuda() if gpu else model.cpu()
     model = copy.deepcopy(model)
     ws0 = copy.deepcopy(model.state_dict())
@@ -89,9 +94,19 @@ def get_loss_landscape(model, n_ff, dataset, transform=None,
             batch = tuple(t.to("cuda") for t in batch)
             input_ids, input_mask, segment_ids, label_ids, seq_lengths = batch
             with torch.no_grad():
+                if kd_type is not None:
+                    teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
                 student_logits, student_atts, student_reps, student_probs, student_values = model(input_ids, segment_ids, input_mask, teacher_outputs=None)
-            lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
-            loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
+            
+            if kd_type == "pred":
+                loss = soft_cross_entropy(student_logits,teacher_logits)
+            elif kd_type == "trm":
+                for i, (student_rep, teacher_rep) in enumerate(zip(student_reps, teacher_reps)):
+                    tmp_loss = MSELoss()(student_rep, teacher_rep)
+                    loss += tmp_loss
+            else:
+                lprobs = torch.nn.functional.log_softmax(student_logits, dim=-1)
+                loss = torch.nn.functional.nll_loss(lprobs, label_ids, reduction='sum')
             
             nll_meter.update(loss.item())
             if verbose:
