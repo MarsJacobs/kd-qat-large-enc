@@ -192,6 +192,7 @@ def main():
         teacher_model.to(device)
         teacher_model.eval()
     else:
+        args.kd_loss_type = None
         teacher_model = None
 
     student_model_dir = os.path.join(output_dir, args.task_name, "exploration", args.model_name)   
