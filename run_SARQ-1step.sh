@@ -26,12 +26,12 @@ index_ratio=0.01
 map=0
 
 #===========================================================#
-bert=$6
+bert=base
 loss_SM=0
 sm_temp=0
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
-weight_bits=2 # 8, 2
+weight_bits=2 # 8, 4, 2
 input_bits=8 # 8, 2
 clipping=0
 
@@ -53,10 +53,10 @@ log_map=0
 gt_loss=0
 pred_distill=1
 rep_distill=1
-attn_distill=0
-attnmap_distill=$3
+attn_distill=$3
+attnmap_distill=$4
 context_distill=0
-output_distill=$4
+output_distill=0
 sa_output_distill=0
 
 

@@ -223,7 +223,7 @@ class BertSelfAttention(nn.Module):
     
         if self.config.teacher_attnmap and teacher_probs is not None:
             # Teacher Map Insertion
-            tc_attention_probs = teacher_probs[-2][self.i]
+            tc_attention_probs = teacher_probs[0][self.i]
             attention_prob = st_attention_probs # attention probs to return (for append)
             attention_probs = self.dropout(tc_attention_probs)
 
@@ -252,7 +252,7 @@ class BertSelfAttention(nn.Module):
                 # value_layer = self.act_quantizer.apply(value_layer, self.clip_value, self.input_bits, True)
                 attention_probs = self.qk_act_quantizer(attention_probs)
                 value_layer = self.v_act_quantizer(value_layer)
-        
+
         context_layer = torch.matmul(attention_probs, value_layer)
         context_layer_ = context_layer
 

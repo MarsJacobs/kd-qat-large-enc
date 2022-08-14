@@ -33,6 +33,35 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import torch.nn.functional as F
+import time
+
+class TimeTracker(object):
+    # _time_func = time.perf_counter  # seconds
+    _time_func = time.time  # seconds
+
+    def __init__(self) -> None:
+        self.t = self._time_func()
+        self.duration = 0.0
+
+    def reset(self) -> None:
+        self.t = self._time_func()
+        self.duration = 0.0
+
+    def update(self) -> float:
+        """Get duration from the latest reset/update."""
+        new_t = self._time_func()
+        self.duration = new_t - self.t
+        self.t = new_t
+        return float(self.duration)
+
+    def update_and_reset(self) -> float:
+        u = self.update()
+        self.reset()
+        return u
+
+    def get(self) -> float:
+        return float(self.duration)
+
 
 log_format = '%(asctime)s %(message)s'
 logging.basicConfig(stream=sys.stdout, level=logging.INFO,
@@ -743,6 +772,7 @@ def main():
     # Logging setup
     # ================================================================================ #
     run = None
+    # time_tracker = TimeTracker()
 
     # Use Neptune for logging
     if args.neptune:
@@ -957,7 +987,7 @@ def main():
     # SARQ Step-2 Iteration Number Setting
     if args.training_type == "qat_step2": 
         logger.info(f"total iter number is {num_train_optimization_steps - args.eval_step} =  {num_train_optimization_steps} - {args.eval_step} ")
-        num_train_optimization_steps = num_train_optimization_steps - args.eval_step
+        # num_train_optimization_steps = num_train_optimization_steps - args.eval_step
     
     train_data, _ = get_tensor_data(output_mode, train_features)
     train_sampler = RandomSampler(train_data)
@@ -1129,7 +1159,7 @@ def main():
     if n_gpu > 1:
         student_model = torch.nn.DataParallel(student_model)
     param_optimizer = list(student_model.named_parameters())
-
+    
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight', 'temperature']
     clip_decay = ['clip_val', 'clip_valn']
     coeff = ["coeff"]
@@ -1203,8 +1233,9 @@ def main():
         nb_tr_examples, nb_tr_steps = 0, 0
         student_config.layer_thres_num += 6*epoch_
 
-        for batch in train_dataloader:
+        for batch in tqdm(train_dataloader):
             
+            # time_tracker.reset()
             student_model.train()
             
             batch = tuple(t.to(device) for t in batch)
@@ -1341,9 +1372,11 @@ def main():
                     tmp_loss = MSELoss()(student_rep, teacher_rep)
                     rep_loss += tmp_loss
                 l_rep_loss.update(rep_loss.item())
-
             loss += cls_loss + rep_loss + attmap_loss + output_loss + sa_output_loss + attscore_loss
             l_loss.update(loss.item())
+            
+            # time_tracker.update()
+            # logger.info(f"iter durateion {time_tracker.get():.4f}")
 
             if n_gpu > 1:
                 loss = loss.mean()           
@@ -1551,9 +1584,10 @@ def main():
     logger.info(f"==> Last Result = {result}")
     
     # Save Best Score
-    best_txt = os.path.join(output_quant_dir, "best_info.txt")
-    with open(best_txt, "w") as f_w:
-        f_w.write(previous_best)
+    if args.save_quantized_model:
+        best_txt = os.path.join(output_quant_dir, "best_info.txt")
+        with open(best_txt, "w") as f_w:
+            f_w.write(previous_best)
 
 if __name__ == "__main__":
     main()

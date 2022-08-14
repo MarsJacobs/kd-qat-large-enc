@@ -225,13 +225,14 @@ def main():
     model_dir = os.path.join(output_dir, task_name, "exploration", args.model_name)
     model_config = BertConfig.from_pretrained(model_dir)             
 
-    quant_model_dir = os.path.join(output_dir, task_name, "exploration", args.quant_model_name)
-    quant_config = BertConfig.from_pretrained(quant_model_dir)             
+    # quant_model_dir = os.path.join(output_dir, task_name, "exploration", args.quant_model_name)
+    # quant_config = BertConfig.from_pretrained(quant_model_dir)             
 
     if args.init:
         model = QuantBertForSequenceClassification.from_pretrained(init_dir, config = quant_config, num_labels=num_labels)
     else:
-        model = QuantBertForSequenceClassification.from_pretrained(model_dir, config = model_config, num_labels=num_labels)
+        model = BertForSequenceClassification.from_pretrained(model_dir, num_labels=num_labels)
+        # model = QuantBertForSequenceClassification.from_pretrained(model_dir, config = model_config, num_labels=num_labels)
     
     model.to(device)
 

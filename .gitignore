@@ -1,6 +1,4 @@
 data
-sarq_1sb_loss_scipts.sh
-sarq_gt_loss_scripts.sh
 tensor_files
 CIFAR10
 models
