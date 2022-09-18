@@ -1519,19 +1519,19 @@ def main():
 
                 if task_name in acc_tasks and result['acc'] > best_dev_acc:
                     if task_name in ['sst-2','mnli','qnli','rte']:
-                        previous_best = f"acc:{result['acc']}"
+                        previous_best = f"{result['acc']*100}"
                     elif task_name in ['mrpc','qqp']:
-                        previous_best = f"f1/acc:{result['f1']}/{result['acc']} avg : {(result['f1'] + result['acc'])*50}"
+                        previous_best = f"{(result['f1'] + result['acc'])*50}"
                     best_dev_acc = result['acc']
                     save_model = True
 
                 if task_name in corr_tasks and result['corr'] > best_dev_acc:
-                    previous_best = f"pearson/spearmanr:{result['pearson']}/{result['spearmanr']} corr:{result['corr']}"
+                    previous_best = f"{result['corr']*100}"
                     best_dev_acc = result['corr']
                     save_model = True
 
                 if task_name in mcc_tasks and result['mcc'] > best_dev_acc:
-                    previous_best = f"mcc:{result['mcc']}"
+                    previous_best = f"{result['mcc']*100}"
                     best_dev_acc = result['mcc']
                     save_model = True
 
