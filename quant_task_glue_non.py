@@ -864,7 +864,7 @@ def main():
             args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_ci_c_C")
             # args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_c")
         elif args.step1_option == "co":
-            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_CI_C_O")
+            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_C")
         elif args.step1_option == "three":
             args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1.5_ci_c")
             # args.student_model = os.path.join(args.output_dir, task_name, "last", "sarq_step1.5_ci_c_l")
@@ -905,9 +905,9 @@ def main():
     }
 
     default_params = {
-        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 200}, # No Aug : 50 Aug : 400
+        "cola": {"max_seq_length": 64,"batch_size":16,"eval_step": 400 if args.aug_train else 50}, # No Aug : 50 Aug : 400
         "mnli": {"max_seq_length": 128,"batch_size":32,"eval_step":8000},
-        "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":20},
+        "mrpc": {"max_seq_length": 128,"batch_size":32,"eval_step":50},
         "sst-2": {"max_seq_length": 64,"batch_size":32,"eval_step":100},
         "sts-b": {"max_seq_length": 128,"batch_size":32,"eval_step":100},
         "qqp": {"max_seq_length": 128,"batch_size":32,"eval_step":1000},
@@ -985,9 +985,11 @@ def main():
     num_train_optimization_steps = math.ceil(len(train_features) / args.batch_size) * num_train_epochs
     
     # SARQ Step-2 Iteration Number Setting
+    if args.training_type == "qat_step1": 
+        args.eval_step = 10
     if args.training_type == "qat_step2": 
-        logger.info(f"total iter number is {num_train_optimization_steps - args.eval_step} =  {num_train_optimization_steps} - {args.eval_step} ")
-        # num_train_optimization_steps = num_train_optimization_steps - args.eval_step
+        # logger.info(f"total iter number is {num_train_optimization_steps} - 50  =  {num_train_optimization_steps-50} ")
+        num_train_optimization_steps = num_train_optimization_steps - 50
     
     train_data, _ = get_tensor_data(output_mode, train_features)
     train_sampler = RandomSampler(train_data)
@@ -1058,7 +1060,7 @@ def main():
     
     result = do_eval(teacher_model, task_name, eval_dataloader,
                     device, output_mode, eval_labels, num_labels)
-    logger.info(result)
+    # logger.info(result)
     
     # ================================================================================  #
     # Save Teacher Model Peroformance for KD Training
@@ -1233,7 +1235,7 @@ def main():
         nb_tr_examples, nb_tr_steps = 0, 0
         student_config.layer_thres_num += 6*epoch_
 
-        for batch in tqdm(train_dataloader):
+        for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True, leave=False):
             
             # time_tracker.reset()
             student_model.train()
@@ -1252,9 +1254,9 @@ def main():
             loss = 0.
             
             with torch.no_grad():
-                teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_values = teacher_model(input_ids, segment_ids, input_mask)
+                teacher_logits, teacher_atts, teacher_reps, teacher_probs, teacher_attn_blocks = teacher_model(input_ids, segment_ids, input_mask)
         
-            student_logits, student_atts, student_reps, student_probs, student_values = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits))
+            student_logits, student_atts, student_reps, student_probs, student_attn_blocks = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_attn_blocks))
             # _, loss, cls_loss, rep_loss, output_loss, attmap_loss, attscore_loss, student_zip  = student_model(input_ids, segment_ids, input_mask, teacher_outputs=(teacher_probs, teacher_values, teacher_reps, teacher_logits, teacher_atts), output_mode=output_mode, seq_lengths=seq_lengths)
 
             if args.gt_loss:
@@ -1279,21 +1281,21 @@ def main():
             
             # Output Loss
             if args.output_distill:
-                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-                    coeff = (i / student_config.num_hidden_layers) + 0.2
-                    # coeff = 1
-                    tmp_loss = MSELoss()(student_value[1], teacher_value[1]) # 1 : Attention Output 0 : Layer Context
+                for i, (student_attn_block, teacher_attn_block) in enumerate(zip(student_attn_blocks, teacher_attn_blocks)):    
+                    # coeff = (i / student_config.num_hidden_layers) + 0.2
+                    coeff = 1
+                    tmp_loss = MSELoss()(student_attn_block[1], teacher_attn_block[1]) # 1 : Attention Output 0 : Layer Context
 
                     tmp_loss = tmp_loss * coeff
                     output_loss += tmp_loss
                 l_output_loss.update(output_loss.item())
             
             # SA Output Loss
-            if args.sa_output_distill:
-                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-                    tmp_loss = MSELoss()(student_value[3], teacher_value[3]) # 1 : Attention Output 0 : Layer Context
-                    sa_output_loss += tmp_loss
-                l_sa_output_loss.update(sa_output_loss.item())
+            # if args.sa_output_distill:
+            #     for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
+            #         tmp_loss = MSELoss()(student_value[3], teacher_value[3]) # 1 : Attention Output 0 : Layer Context
+            #         sa_output_loss += tmp_loss
+            #     l_sa_output_loss.update(sa_output_loss.item())
 
             # Attention Score Loss
             if args.attn_distill:
@@ -1574,14 +1576,16 @@ def main():
                 
                 # SARQ Step-1
                 if args.training_type == "qat_step1":
-                    if eval_score >= fp32_score:
-                        logger.info(f"{global_step}-step : {eval_score} >= {fp32_score}, Step-1 Finished...")
-                        return 
+                    if global_step >= 50:
+                        return
+                    # if eval_score >= fp32_score:
+                    #     logger.info(f"{global_step}-step : {eval_score} >= {fp32_score}, Step-1 Finished...")
+                    #     return 
 
     
 
     logger.info(f"==> Previous Best = {previous_best}")
-    logger.info(f"==> Last Result = {result}")
+    # logger.info(f"==> Last Result = {result}")
     
     # Save Best Score
     if args.save_quantized_model:
