@@ -53,10 +53,10 @@ log_map=0
 gt_loss=0
 pred_distill=1
 rep_distill=1
-attn_distill=0
+attn_distill=1
 attnmap_distill=0
 context_distill=0
-output_distill=1
+output_distill=0
 sa_output_distill=0
 
 

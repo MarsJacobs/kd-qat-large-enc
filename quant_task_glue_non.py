@@ -737,6 +737,10 @@ def main():
     parser.add_argument('--teacher_context',
                         default =False, type=str2bool,
                         help="Teacher Intervention Option (Context)")
+
+    parser.add_argument('--teacher_output',
+                        default =False, type=str2bool,
+                        help="Teacher Intervention Option (Output)")
     
     parser.add_argument('--teacher_input',
                         default =False, type=str2bool,
@@ -804,6 +808,7 @@ def main():
     if args.sa_output_distill:
         exp_name += "_SA"
     
+    exp_name += f"_{args.seed}"
     args.exp_name = exp_name
     
     # Print Setting Info
@@ -1114,6 +1119,7 @@ def main():
                                                 clip_method = args.clip_method,
                                                 teacher_attnmap = args.teacher_attnmap,
                                                 teacher_context = args.teacher_context,
+                                                teacher_output = args.teacher_output,
                                                 teacher_input = args.teacher_input,
                                                 layer_thres_num= args.layer_thres_num,
                                                 parks = args.parks,
@@ -1216,6 +1222,7 @@ def main():
     l_cls_loss = AverageMeter()
     l_output_loss = AverageMeter()
     l_sa_output_loss = AverageMeter()
+    l_context_loss = AverageMeter()
     l_loss = AverageMeter()
     
     # grad_dict = dict()
@@ -1251,6 +1258,7 @@ def main():
             attscore_loss = 0.
             output_loss = 0.
             sa_output_loss = 0.
+            context_loss = 0.
             loss = 0.
             
             with torch.no_grad():
@@ -1278,25 +1286,28 @@ def main():
                 else:
                     cls_loss = soft_cross_entropy(student_logits,teacher_logits)
                 l_cls_loss.update(cls_loss.item())
+
+            # Context Loss
+            if args.context_distill:
+                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
+                    tmp_loss = MSELoss()(student_value[0], teacher_value[0]) # 1 : Attention Output 0 : Layer Context
+                    context_loss += tmp_loss
+                l_context_loss.update(context_loss.item())
             
             # Output Loss
             if args.output_distill:
                 for i, (student_attn_block, teacher_attn_block) in enumerate(zip(student_attn_blocks, teacher_attn_blocks)):    
-                    # coeff = (i / student_config.num_hidden_layers) + 0.2
-                    coeff = 1
                     tmp_loss = MSELoss()(student_attn_block[1], teacher_attn_block[1]) # 1 : Attention Output 0 : Layer Context
-
-                    tmp_loss = tmp_loss * coeff
                     output_loss += tmp_loss
                 l_output_loss.update(output_loss.item())
             
             # SA Output Loss
-            # if args.sa_output_distill:
-            #     for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-            #         tmp_loss = MSELoss()(student_value[3], teacher_value[3]) # 1 : Attention Output 0 : Layer Context
-            #         sa_output_loss += tmp_loss
-            #     l_sa_output_loss.update(sa_output_loss.item())
-
+            if args.sa_output_distill:
+                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
+                    tmp_loss = MSELoss()(student_value[2], teacher_value[2]) # 1 : Attention Output 0 : Layer Context
+                    sa_output_loss += tmp_loss
+                l_sa_output_loss.update(sa_output_loss.item())
+            
             # Attention Score Loss
             if args.attn_distill:
                 for i, (student_att, teacher_att) in enumerate(zip(student_atts, teacher_atts)):    
@@ -1374,7 +1385,8 @@ def main():
                     tmp_loss = MSELoss()(student_rep, teacher_rep)
                     rep_loss += tmp_loss
                 l_rep_loss.update(rep_loss.item())
-            loss += cls_loss + rep_loss + attmap_loss + output_loss + sa_output_loss + attscore_loss
+
+            loss += cls_loss + rep_loss + attmap_loss + output_loss + sa_output_loss + attscore_loss + context_loss
             l_loss.update(loss.item())
             
             # time_tracker.update()
@@ -1561,18 +1573,18 @@ def main():
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)
                         
-                        model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
-                        quant_model = copy.deepcopy(model_to_save)
-                        # for name, module in quant_model.named_modules():
-                        #     if hasattr(module,'weight_quantizer'):
-                        #         module.qweight = module.weight_quantizer(module.weight, True)
+                        # model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
+                        # quant_model = copy.deepcopy(model_to_save)
+                        # # for name, module in quant_model.named_modules():
+                        # #     if hasattr(module,'weight_quantizer'):
+                        # #         module.qweight = module.weight_quantizer(module.weight, True)
                                 
-                        output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
-                        output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
+                        # output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
+                        # output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
 
-                        torch.save(quant_model.state_dict(), output_model_file)
-                        model_to_save.config.to_json_file(output_config_file)
-                        tokenizer.save_vocabulary(output_quant_dir)
+                        # torch.save(quant_model.state_dict(), output_model_file)
+                        # model_to_save.config.to_json_file(output_config_file)
+                        # tokenizer.save_vocabulary(output_quant_dir)
                 
                 # SARQ Step-1
                 if args.training_type == "qat_step1":

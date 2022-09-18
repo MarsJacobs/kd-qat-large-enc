@@ -105,20 +105,16 @@ class BertSelfAttention(nn.Module):
         # Weight Quant Setting
         # ================================================================================ #
         
-        is_q_layer = True
-        if config.layer_num != -1:
-            is_q_layer = config.layer_num > i
-        
-        if self.config.quantize and config.qkv_q and is_q_layer:
+        if self.config.quantize:
             
             if self.config.quantize_weight:
                 self.weight_quant_flag = True
 
-            if self.config.qk_FP:
+            if self.config.teacher_attnmap:
                 self.query = nn.Linear(config.hidden_size, self.all_head_size)
                 self.key = nn.Linear(config.hidden_size, self.all_head_size)
                 self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
-            elif self.config.qkv_FP:
+            elif self.config.teacher_context or self.config.teacher_output:
                 self.query = nn.Linear(config.hidden_size, self.all_head_size)
                 self.key = nn.Linear(config.hidden_size, self.all_head_size)
                 self.value = nn.Linear(config.hidden_size, self.all_head_size)
@@ -127,9 +123,6 @@ class BertSelfAttention(nn.Module):
                 self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, map=self.config.map, name=f"layer_{self.i}_{self.__class__.__name__}_key", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
                 self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
 
-
-            
-            
         elif config.clipping:
             self.query = ClipLinear(config.hidden_size, self.all_head_size, config=config)
             self.key = ClipLinear(config.hidden_size, self.all_head_size, config=config)
@@ -178,16 +171,16 @@ class BertSelfAttention(nn.Module):
 
     def forward(self, hidden_states, attention_mask, teacher_probs=None):
         # Stop Grad 
-        if self.config.stop_grad:
+        if self.config.teacher_attnmap:
             hidden_states_ = hidden_states.clone().detach()
             mixed_query_layer = self.query(hidden_states_)
             mixed_key_layer = self.key(hidden_states_)
             mixed_value_layer = self.value(hidden_states)
-        # elif self.config.stop_grad and self.config.qkv_FP:
-        #     hidden_states_ = hidden_states.clone().detach()
-        #     mixed_query_layer = self.query(hidden_states_)
-        #     mixed_key_layer = self.key(hidden_states_)
-        #     mixed_value_layer = self.value(hidden_states_)
+        elif self.config.teacher_context of self.config.teacher_output:
+            hidden_states_ = hidden_states.clone().detach()
+            mixed_query_layer = self.query(hidden_states_)
+            mixed_key_layer = self.key(hidden_states_)
+            mixed_value_layer = self.value(hidden_states_)
         else:
             mixed_query_layer = self.query(hidden_states)
             mixed_key_layer = self.key(hidden_states)
@@ -199,10 +192,7 @@ class BertSelfAttention(nn.Module):
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
-        value_layer = self.transpose_for_scores(mixed_value_layer)
-        
-        # Value Relation 
-        attention_value = value_layer
+        value_layer = self.transpose_for_scores(mixed_value_layer)        
         
         if self.config.quantize_act:
             if self.config.act_quantizer == "ternary":
@@ -226,19 +216,18 @@ class BertSelfAttention(nn.Module):
             tc_attention_probs = teacher_probs[0][self.i]
             attention_prob = st_attention_probs # attention probs to return (for append)
             attention_probs = self.dropout(tc_attention_probs)
-
         else:
             attention_prob = st_attention_probs # attention probs to return (for append)
             
-            # EXP : PARKS (Step2 Option)
-            if self.config.parks:
-                if self.training:
-                    tc_attention_probs = teacher_probs[self.i]
-                    attention_probs = self.dropout(tc_attention_probs)
-                else:
-                    attention_probs = self.dropout(st_attention_probs)
-            else:
-                attention_probs = self.dropout(st_attention_probs)
+            # # EXP : PARKS (Step2 Option)
+            # if self.config.parks:
+            #     if self.training:
+            #         tc_attention_probs = teacher_probs[self.i]
+            #         attention_probs = self.dropout(tc_attention_probs)
+            #     else:
+            #         attention_probs = self.dropout(st_attention_probs)
+            # else:
+            #     attention_probs = self.dropout(st_attention_probs)
         
         # quantize both attention probs and value layer for dot product
         if self.config.quantize_act:
@@ -291,56 +280,55 @@ class BertAttention(nn.Module):
             input_tensor = teacher_probs[2][self.i].clone().detach()  # Layer Input Intervention
         
         self_output, layer_att, layer_probs, layer_context = self.self(input_tensor, attention_mask, teacher_probs=teacher_probs)
-        # attention_output, self_output_hs = self.output(self_output, input_tensor)
-        attention_output = self.output(self_output, input_tensor)
+        attention_output, self_output_hs = self.output(self_output, input_tensor, teacher_probs=teacher_probs)
+        # attention_output = self.output(self_output, input_tensor)
         
-        if self.output_norm:
-            norms_outputs = self.norm(
-                input_tensor,
-                layer_probs,
-                # value_layer,
-                self.output.dense
-            )
-            return attention_output, layer_att, layer_probs, (layer_context, attention_output, norms_outputs)
+        # if self.output_norm:
+        #     norms_outputs = self.norm(
+        #         input_tensor,
+        #         layer_probs,
+        #         # value_layer,
+        #         self.output.dense
+        #     )
+        #     return attention_output, layer_att, layer_probs, (layer_context, attention_output, norms_outputs)
 
-        return attention_output, layer_att, layer_probs, (layer_context, attention_output)
+        return attention_output, layer_att, layer_probs, (layer_context, attention_output, self_output_hs)
 
 
 class BertSelfOutput(nn.Module):
     def __init__(self, config, i):
         super(BertSelfOutput, self).__init__()
 
-        is_q_layer = True
-        self.act_quant_flag = False
-        self.weight_quant_flag = False
-
+        # self.act_quant_flag = False
+        # self.weight_quant_flag = False
+        self.config = config
+        self.i = i
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_size = int(
             config.hidden_size / config.num_attention_heads)
 
-        if config.layer_num != -1:
-            is_q_layer = config.layer_num > i
-
-        if config.quantize and config.qkv_q and is_q_layer:
+        # if config.quantize:
             
-            if config.quantize_weight:
-                self.weight_quant_flag = True
+        #     if config.quantize_weight:
+        #         self.weight_quant_flag = True
             
-            if config.quantize_act:
-                self.act_quant_flag = True
+        #     if config.quantize_act:
+        #         self.act_quant_flag = True
 
+        if self.config.teacher_output:
+            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        else:
             self.dense = QuantizeLinear(config.hidden_size, config.hidden_size,config=config, name=f"layer_{i}_{self.__class__.__name__}_output", weight_flag=self.weight_quant_flag, act_flag=self.act_quant_flag, input_bit=config.input_bits)
             
-        elif config.clipping:
-            self.dense = ClipLinear(config.hidden_size, config.hidden_size, config=config)
-            
-        else:
-            self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        # elif config.clipping:
+        #     self.dense = ClipLinear(config.hidden_size, config.hidden_size, config=config)
+        # else:
+        #     self.dense = nn.Linear(config.hidden_size, config.hidden_size)
 
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, hidden_states, input_tensor):
+    def forward(self, hidden_states, input_tensor, teacher_probs=None):
         # Norm Based 
         # layer_value = layer_value.permute(0, 2, 1, 3)
         # layer_value = layer_value.reshape(layer_value.shape[0], layer_value.shape[1], -1)
@@ -351,10 +339,14 @@ class BertSelfOutput(nn.Module):
         # norm_based = norm_based.permute(0, 2, 1, 3)
 
         hidden_states = self.dense(hidden_states)
-        # self_output_hs = hidden_states
+        self_output_hs = hidden_states
+
+        if config.teacher_output:
+            hidden_states = teacher_probs[1][self.i][2] # SA-output
+
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states # , self_output_hs
+        return hidden_states ,self_output_hs
 
 
 class BertIntermediate(nn.Module):
