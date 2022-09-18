@@ -119,8 +119,8 @@ class BertSelfAttention(nn.Module):
                 self.key = nn.Linear(config.hidden_size, self.all_head_size)
                 self.value = nn.Linear(config.hidden_size, self.all_head_size)
             else:
-                self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, map=self.config.map, name=f"layer_{self.i}_{self.__class__.__name__}_query", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
-                self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, map=self.config.map, name=f"layer_{self.i}_{self.__class__.__name__}_key", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+                self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_query", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+                self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_key", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
                 self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
 
         elif config.clipping:
@@ -176,7 +176,7 @@ class BertSelfAttention(nn.Module):
             mixed_query_layer = self.query(hidden_states_)
             mixed_key_layer = self.key(hidden_states_)
             mixed_value_layer = self.value(hidden_states)
-        elif self.config.teacher_context of self.config.teacher_output:
+        elif self.config.teacher_context or self.config.teacher_output:
             hidden_states_ = hidden_states.clone().detach()
             mixed_query_layer = self.query(hidden_states_)
             mixed_key_layer = self.key(hidden_states_)
@@ -218,7 +218,7 @@ class BertSelfAttention(nn.Module):
             attention_probs = self.dropout(tc_attention_probs)
         else:
             attention_prob = st_attention_probs # attention probs to return (for append)
-            
+            attention_probs = self.dropout(st_attention_probs)
             # # EXP : PARKS (Step2 Option)
             # if self.config.parks:
             #     if self.training:
@@ -276,8 +276,8 @@ class BertAttention(nn.Module):
 
     def forward(self, input_tensor, attention_mask, teacher_probs=None):
 
-        if self.training and self.config.teacher_input and self.config.num_hidden_layers > 12 and self.i == self.config.layer_thres_num:
-            input_tensor = teacher_probs[2][self.i].clone().detach()  # Layer Input Intervention
+        # if self.training and self.config.teacher_input and self.config.num_hidden_layers > 12 and self.i == self.config.layer_thres_num:
+        #     input_tensor = teacher_probs[2][self.i].clone().detach()  # Layer Input Intervention
         
         self_output, layer_att, layer_probs, layer_context = self.self(input_tensor, attention_mask, teacher_probs=teacher_probs)
         attention_output, self_output_hs = self.output(self_output, input_tensor, teacher_probs=teacher_probs)
@@ -307,13 +307,13 @@ class BertSelfOutput(nn.Module):
         self.attention_head_size = int(
             config.hidden_size / config.num_attention_heads)
 
-        # if config.quantize:
+        if config.quantize:
             
-        #     if config.quantize_weight:
-        #         self.weight_quant_flag = True
+            if config.quantize_weight:
+                self.weight_quant_flag = True
             
-        #     if config.quantize_act:
-        #         self.act_quant_flag = True
+            if config.quantize_act:
+                self.act_quant_flag = True
 
         if self.config.teacher_output:
             self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -341,7 +341,7 @@ class BertSelfOutput(nn.Module):
         hidden_states = self.dense(hidden_states)
         self_output_hs = hidden_states
 
-        if config.teacher_output:
+        if self.config.teacher_output:
             hidden_states = teacher_probs[1][self.i][2] # SA-output
 
         hidden_states = self.dropout(hidden_states)
@@ -553,7 +553,7 @@ class BertPreTrainedModel(nn.Module):
         if state_dict is None:
             weights_path = os.path.join(
                 pretrained_model_name_or_path, WEIGHTS_NAME)
-            logger.info("Loading model {}".format(weights_path))
+            # logger.info("Loading model {}".format(weights_path))
             state_dict = torch.load(weights_path, map_location='cpu')
 
         # Load from a PyTorch state_dict
@@ -593,20 +593,20 @@ class BertPreTrainedModel(nn.Module):
         if not hasattr(model, 'bert') and any(s.startswith('bert.') for s in state_dict.keys()):
             start_prefix = 'bert.'
 
-        logger.info('loading model...')
+        # logger.info('loading model...')
         
         load(model, prefix=start_prefix)
-        logger.info('done!')
-        if len(missing_keys) > 0:
-            # logger.info("Weights of {} not initialized from pretrained model: {}".format(
-            #     model.__class__.__name__, missing_keys))
-            pass
-        if len(unexpected_keys) > 0:
-            logger.info("Weights from pretrained model not used in {}: {}".format(
-                model.__class__.__name__, unexpected_keys))
-        if len(error_msgs) > 0:
-            raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
-                               model.__class__.__name__, "\n\t".join(error_msgs)))
+        # logger.info('done!')
+        # if len(missing_keys) > 0:
+        #     # logger.info("Weights of {} not initialized from pretrained model: {}".format(
+        #     #     model.__class__.__name__, missing_keys))
+        #     pass
+        # if len(unexpected_keys) > 0:
+        #     logger.info("Weights from pretrained model not used in {}: {}".format(
+        #         model.__class__.__name__, unexpected_keys))
+        # if len(error_msgs) > 0:
+        #     raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+        #                        model.__class__.__name__, "\n\t".join(error_msgs)))
 
         return model
 

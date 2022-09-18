@@ -26,10 +26,9 @@ index_ratio=0.01
 map=0
 
 #===========================================================#
-bert=large
+bert=$3
 loss_SM=0
 sm_temp=0
-step1_option=map
 quantizer=ternary # ternary, pact, lsq
 act_quantizer=ternary
 weight_bits=2 # 8, 2
@@ -46,24 +45,25 @@ log_metric=0
 log_map=0
 
 # Distill Option
+step1_option=map # for step_2 {MI, CI, OI}
 gt_loss=1
 pred_distill=1
 rep_distill=1
 attn_distill=0
-attnmap_distill=0
+attnmap_distill=$4
 word_distill=0
 val_distill=0
-context_distill=1
-output_distill=0
+context_distill=$5
+output_distill=$6
 sa_output_distill=0
 
 # deprecated
 value_relation=0
 
 # Teacher Intervention (TI)
-teacher_attnmap=0
-teacher_context=1
-teacher_output=0
+teacher_attnmap=$7
+teacher_context=$8
+teacher_output=$9
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
 training_type=qat_step1
@@ -111,6 +111,6 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --num_train_epochs 3 \
 --teacher_attnmap ${teacher_attnmap} --teacher_context ${teacher_context} --teacher_output ${teacher_output} \
 --other_lr ${other_lr} \
---seed 42 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
+--seed 1 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
 --step1_option ${step1_option} \
 --learning_rate ${learning_rate} 

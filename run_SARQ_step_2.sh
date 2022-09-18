@@ -40,9 +40,9 @@ qk_FP=0
 
 # Logging Option
 exp_name=step_2
-step1_option=co
+step1_option=$8
 neptune=0
-save_quantized_model=0
+save_quantized_model=1
 
 prob_log=0
 log_metric=0
@@ -54,9 +54,9 @@ pred_distill=1
 rep_distill=1
 
 attn_distill=0
-attnmap_distill=0
-context_distill=0
-output_distill=1
+attnmap_distill=$5
+context_distill=$6
+output_distill=$7
 
 word_distill=0
 val_distill=0
@@ -90,7 +90,7 @@ learning_rate=2E-5
 other_lr=2E-5
 # ===========================================================#
 
-CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_name $2 --output_dir output --num_train_epochs 3 --bert ${bert} \
+CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_name $2 --output_dir output --num_train_epochs $9 --bert ${bert} \
 --weight_bits ${weight_bits} --input_bits ${input_bits} --kd_layer_num ${kd_layer_num} \
 --gpu 1 --quantize ${quantize} --act_quant ${act_quant} --qkv ${q_qkv} --ffn_1 ${q_ffn_1} --ffn_2 ${q_ffn_2} --emb ${q_emb} --cls ${q_cls} \
 --layer_num ${layer_num} \

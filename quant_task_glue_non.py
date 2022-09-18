@@ -795,20 +795,30 @@ def main():
     # Exp Name
     exp_name = args.exp_name 
 
-    if args.loss_SM:
-        exp_name = exp_name + "_" + str(args.sm_temp)
-    if args.attn_distill:
-        exp_name += "_S"
-    if args.attnmap_distill:
-        exp_name += "_M"
-    if args.context_distill:
-        exp_name += "_C"
-    if args.output_distill:
-        exp_name += "_O"
-    if args.sa_output_distill:
-        exp_name += "_SA"
+    exp_name += f"_{args.bert}"
+
+    if args.training_type == "qat_step1":
+        if args.teacher_attnmap:
+            exp_name += f"_MI"
+        if args.teacher_context:
+            exp_name += f"_CI"
+        if args.teacher_output:
+            exp_name += f"_OI"
+    else:
+        if args.attn_distill:
+            exp_name += "_S"
+        if args.attnmap_distill:
+            exp_name += "_M"
+        if args.context_distill:
+            exp_name += "_C"
+        if args.output_distill:
+            exp_name += "_O"
+        if args.sa_output_distill:
+            exp_name += "_SA"
+
+        exp_name += f"_{args.seed}"            
     
-    exp_name += f"_{args.seed}"
+    
     args.exp_name = exp_name
     
     # Print Setting Info
@@ -840,9 +850,13 @@ def main():
         args.model_dir = os.path.join(args.model_dir, "BERT_large")
         args.output_dir = os.path.join(args.output_dir, "BERT_large")
     
-    if args.bert == "tiny":
-        args.model_dir = os.path.join(args.model_dir, "BERT_Tiny")
-        args.output_dir = os.path.join(args.output_dir, "BERT_Tiny")
+    if args.bert == "tiny-4l":
+        args.model_dir = os.path.join(args.model_dir, "BERT_Tiny_4l")
+        args.output_dir = os.path.join(args.output_dir, "BERT_Tiny_4l")
+    
+    if args.bert == "tiny-6l":
+        args.model_dir = os.path.join(args.model_dir, "BERT_Tiny_6l")
+        args.output_dir = os.path.join(args.output_dir, "BERT_Tiny_6l")
     
     # Model Save Directory
     output_dir = os.path.join(args.output_dir,task_name)
@@ -858,28 +872,14 @@ def main():
         args.student_model = os.path.join(args.model_dir, "BERT_base")
     elif args.training_type == "qat_normal":
         args.student_model = os.path.join(args.model_dir,task_name) 
-        # args.student_model = os.path.join(args.output_dir, task_name, "exploration", "1SB_1epoch_S")
     elif args.training_type == "qat_step1":
         args.student_model = os.path.join(args.model_dir, task_name) 
-    
-    elif args.training_type == "qat_step2": 
-        if args.step1_option == "map":
-            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_TI_S_M")
-        elif args.step1_option == "cc":
-            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_ci_c_C")
-            # args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1_ci_c")
-        elif args.step1_option == "co":
-            args.student_model = os.path.join(args.output_dir, task_name, "exploration", "sarq_step1_C")
-        elif args.step1_option == "three":
-            args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1.5_ci_c")
-            # args.student_model = os.path.join(args.output_dir, task_name, "last", "sarq_step1.5_ci_c_l")
-        else:
-            args.student_model = os.path.join(args.output_dir, task_name, "quant", "sarq_step1")
-    
-    elif args.training_type == "qat_step3":
-        args.student_model = os.path.join("output", task_name, "quant", "step2_pact_4bit")
-    elif args.training_type == "gradual": # For Gradual Quantization
-        args.student_model = os.path.join("output", task_name, "quant", "2SB_4bit_save") 
+    elif args.training_type == "qat_step2":        
+        args.student_model = os.path.join(args.output_dir, task_name, "exploration", f"sarq_step1_{args.bert}_{args.step1_option}")
+    # elif args.training_type == "qat_step3":
+    #     args.student_model = os.path.join("output", task_name, "quant", "step2_pact_4bit")
+    # elif args.training_type == "gradual": # For Gradual Quantization
+    #     args.student_model = os.path.join("output", task_name, "quant", "2SB_4bit_save") 
     else:
         raise ValueError("Choose Training Type {downsteam, qat_normal, qat_step1, qat_step2, qat_step3, gradual}")
 
@@ -990,11 +990,16 @@ def main():
     num_train_optimization_steps = math.ceil(len(train_features) / args.batch_size) * num_train_epochs
     
     # SARQ Step-2 Iteration Number Setting
+    if "tiny" in args.bert:
+        sarq_step_1_total_step = 150
+    else:
+        sarq_step_1_total_step = 50
+
     if args.training_type == "qat_step1": 
         args.eval_step = 10
+
     if args.training_type == "qat_step2": 
-        # logger.info(f"total iter number is {num_train_optimization_steps} - 50  =  {num_train_optimization_steps-50} ")
-        num_train_optimization_steps = num_train_optimization_steps - 50
+        num_train_optimization_steps = num_train_optimization_steps - sarq_step_1_total_step
     
     train_data, _ = get_tensor_data(output_mode, train_features)
     train_sampler = RandomSampler(train_data)
@@ -1075,11 +1080,11 @@ def main():
             fp32_performance = f"acc:{result['acc']}"
             fp32_score = result['acc']
         elif task_name in ['mrpc','qqp']:
-            fp32_performance = f"f1/acc:{result['f1']}/{result['acc']} avg : {result['f1'] + result['acc'] /2}"
-            fp32_score = (result['f1'] + result['acc'])*0.5
+            fp32_performance = f"f1/acc:{result['f1']}/{result['acc']} avg : {(result['f1'] + result['acc'])*50}"
+            fp32_score = (result['f1'] + result['acc'])*50
     if task_name in corr_tasks:
         fp32_performance = f"pearson/spearmanr:{result['pearson']}/{result['spearmanr']} corr:{result['corr']}"
-        fp32_score = result['corr']
+        fp32_score = result['corr']*100
 
     if task_name in mcc_tasks:
         fp32_performance = f"mcc:{result['mcc']}"
@@ -1120,16 +1125,6 @@ def main():
                                                 teacher_attnmap = args.teacher_attnmap,
                                                 teacher_context = args.teacher_context,
                                                 teacher_output = args.teacher_output,
-                                                teacher_input = args.teacher_input,
-                                                layer_thres_num= args.layer_thres_num,
-                                                parks = args.parks,
-                                                stop_grad = args.stop_grad,
-                                                qk_FP = args.qk_FP,
-                                                qkv_FP = args.qkv_FP,
-                                                map=args.map,
-                                                sm_temp=args.sm_temp,
-                                                loss_SM=args.loss_SM,
-                                                act_method = args.act_method
                                                 )
     
     student_model = QuantBertForSequenceClassification.from_pretrained(args.student_model, config = student_config, num_labels=num_labels)
@@ -1236,11 +1231,11 @@ def main():
     #layer_attmap_loss = [ AverageMeter() for i in range(12) ]
     #layer_att_loss = [ AverageMeter() for i in range(12) ]
     #layer_rep_loss = [ AverageMeter() for i in range(13) ] # 12 Layers Representation, 1 Word Embedding Layer 
-
+    # import pdb; pdb.set_trace()
     for epoch_ in range(int(num_train_epochs)):
         # logger.info("****************************** %d Epoch ******************************", epoch_)
-        nb_tr_examples, nb_tr_steps = 0, 0
-        student_config.layer_thres_num += 6*epoch_
+        # nb_tr_examples, nb_tr_steps = 0, 0
+        # student_config.layer_thres_num += 6*epoch_
 
         for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True, leave=False):
             
@@ -1289,8 +1284,8 @@ def main():
 
             # Context Loss
             if args.context_distill:
-                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-                    tmp_loss = MSELoss()(student_value[0], teacher_value[0]) # 1 : Attention Output 0 : Layer Context
+                for i, (student_attn_block, teacher_attn_block) in enumerate(zip(student_attn_blocks, teacher_attn_blocks)):    
+                    tmp_loss = MSELoss()(student_attn_block[0], teacher_attn_block[0]) # 1 : Attention Output 0 : Layer Context
                     context_loss += tmp_loss
                 l_context_loss.update(context_loss.item())
             
@@ -1303,8 +1298,8 @@ def main():
             
             # SA Output Loss
             if args.sa_output_distill:
-                for i, (student_value, teacher_value) in enumerate(zip(student_values, teacher_values)):    
-                    tmp_loss = MSELoss()(student_value[2], teacher_value[2]) # 1 : Attention Output 0 : Layer Context
+                for i, (student_attn_block, teacher_attn_block) in enumerate(zip(student_attn_blocks, teacher_attn_blocks)):    
+                    tmp_loss = MSELoss()(student_attn_block[2], teacher_attn_block[2]) # 1 : Attention Output 0 : Layer Context
                     sa_output_loss += tmp_loss
                 l_sa_output_loss.update(sa_output_loss.item())
             
@@ -1547,8 +1542,10 @@ def main():
                         result = do_eval(student_model, 'mnli-mm', mm_eval_dataloader,
                                             device, output_mode, mm_eval_labels, num_labels, teacher_model=teacher_model)
                         previous_best+= f"mm-acc:{result['acc']}"
-                    # logger.info(fp32_performance)
-                    # logger.info(previous_best)
+
+                    if args.training_type == "qat_step1":
+                        logger.info(fp32_performance)
+                        logger.info(previous_best)
                     if args.save_fp_model:
                         # logger.info("***** Save full precision model *****")
                         model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
@@ -1573,22 +1570,27 @@ def main():
                         if not os.path.exists(output_quant_dir):
                             os.makedirs(output_quant_dir)
                         
-                        # model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
-                        # quant_model = copy.deepcopy(model_to_save)
-                        # # for name, module in quant_model.named_modules():
-                        # #     if hasattr(module,'weight_quantizer'):
-                        # #         module.qweight = module.weight_quantizer(module.weight, True)
-                                
-                        # output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
-                        # output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
+                        if args.training_type == "qat_step1":        
+                            model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
+                            quant_model = copy.deepcopy(model_to_save)
+                            # for name, module in quant_model.named_modules():
+                            #     if hasattr(module,'weight_quantizer'):
+                            #         module.qweight = module.weight_quantizer(module.weight, True)
+                                    
+                            output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
+                            output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
 
-                        # torch.save(quant_model.state_dict(), output_model_file)
-                        # model_to_save.config.to_json_file(output_config_file)
-                        # tokenizer.save_vocabulary(output_quant_dir)
+                            torch.save(quant_model.state_dict(), output_model_file)
+                            model_to_save.config.to_json_file(output_config_file)
+                            tokenizer.save_vocabulary(output_quant_dir)
                 
                 # SARQ Step-1
                 if args.training_type == "qat_step1":
-                    if global_step >= 50:
+                    if global_step >= sarq_step_1_total_step:
+                        logger.info(f"==> SARQ-step1 Previous Best = {previous_best}")
+                        best_txt = os.path.join(output_quant_dir, "best_info.txt")
+                        with open(best_txt, "w") as f_w:
+                            f_w.write(previous_best)
                         return
                     # if eval_score >= fp32_score:
                     #     logger.info(f"{global_step}-step : {eval_score} >= {fp32_score}, Step-1 Finished...")
