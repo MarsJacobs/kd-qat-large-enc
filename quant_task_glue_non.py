@@ -742,6 +742,10 @@ def main():
                         default =False, type=str2bool,
                         help="Teacher Intervention Option (Output)")
     
+    parser.add_argument('--teacher_mixed',
+                        default =False, type=str2bool,
+                        help="Teacher Intervention Option (Mixed)")
+    
     parser.add_argument('--teacher_input',
                         default =False, type=str2bool,
                         help="Teacher Intervention Option (Input)")
@@ -804,6 +808,8 @@ def main():
             exp_name += f"_CI"
         if args.teacher_output:
             exp_name += f"_OI"
+        if args.teacher_mixed:
+            exp_name += f"_MIXED"
     else:
         if args.attn_distill:
             exp_name += "_S"
@@ -862,6 +868,18 @@ def main():
     output_dir = os.path.join(args.output_dir,task_name)
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
+    
+    if args.save_quantized_model:
+        output_quant_dir = os.path.join(output_dir, 'exploration')
+        if not os.path.exists(output_quant_dir):
+            os.mkdir(output_quant_dir)
+
+        if not os.path.exists(output_quant_dir):
+            os.makedirs(output_quant_dir)
+        
+        output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
+        if not os.path.exists(output_quant_dir):
+            os.makedirs(output_quant_dir)
 
     # ================================================================================  #
     # Load Pths
@@ -990,13 +1008,14 @@ def main():
     num_train_optimization_steps = math.ceil(len(train_features) / args.batch_size) * num_train_epochs
     
     # SARQ Step-2 Iteration Number Setting
-    if "tiny" in args.bert:
-        sarq_step_1_total_step = 150
+    if "tiny-4l" in args.bert:
+        sarq_step_1_total_step = 120
     else:
-        sarq_step_1_total_step = 50
+        sarq_step_1_total_step = 60
 
     if args.training_type == "qat_step1": 
         args.eval_step = 10
+        num_train_optimization_steps = sarq_step_1_total_step 
 
     if args.training_type == "qat_step2": 
         num_train_optimization_steps = num_train_optimization_steps - sarq_step_1_total_step
@@ -1231,7 +1250,9 @@ def main():
     #layer_attmap_loss = [ AverageMeter() for i in range(12) ]
     #layer_att_loss = [ AverageMeter() for i in range(12) ]
     #layer_rep_loss = [ AverageMeter() for i in range(13) ] # 12 Layers Representation, 1 Word Embedding Layer 
-    # import pdb; pdb.set_trace()
+
+    mixed_status = None
+
     for epoch_ in range(int(num_train_epochs)):
         # logger.info("****************************** %d Epoch ******************************", epoch_)
         # nb_tr_examples, nb_tr_steps = 0, 0
@@ -1239,7 +1260,20 @@ def main():
 
         for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True, leave=False):
             
-            # time_tracker.reset()
+            if args.training_type == "qat_step1" and args.teacher_mixed:
+                if global_step < num_train_optimization_steps / 6:
+                    student_config.teacher_output = True
+                    mixed_status = "OI"
+                elif global_step < num_train_optimization_steps / 3:
+                    student_config.teacher_output = False
+                    student_config.teacher_context = True
+                    mixed_status = "CI"
+                else:
+                    student_config.teacher_output = False
+                    student_config.teacher_context = False
+                    student_config.teacher_attnmap = True
+                    mixed_status = "MI"
+
             student_model.train()
             
             batch = tuple(t.to(device) for t in batch)
@@ -1423,7 +1457,6 @@ def main():
             optimizer.zero_grad()
             
             global_step += 1
-
             # ================================================================================  #
             #  Evaluation
             # ================================================================================ #
@@ -1493,7 +1526,8 @@ def main():
                     eval_score = result["mcc"]
                     if run is not None:
                         run["metrics/mcc"].log(value=result['mcc'], step=global_step)
-                        
+
+                    eval_result = result["mcc"]  
                     # logger.info(f"Eval Result is {result['mcc']}")
                 elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
                     eval_score = result["acc"]
@@ -1501,19 +1535,34 @@ def main():
                         run["metrics/acc"].log(value=result['acc'],step=global_step)
                         
                     # logger.info(f"Eval Result is {result['acc']}")
+                    eval_result = result["acc"]
                 elif task_name in ['mrpc','qqp']:
                     eval_score = result["acc_and_f1"]
                     if run is not None:
                         run["metrics/acc_and_f1"].log(value=result['acc_and_f1'],step=global_step)
                         
                     # logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
+                    eval_result = result["acc_and_f1"]
                 else:
                     eval_score = result["corr"]
                     if run is not None:
                         run["metrics/corr"].log(value=result['corr'],step=global_step)
                         
                     # logger.info(f"Eval Result is {result['corr']}")
+                    eval_result = result["corr"]
 
+                if args.training_type == "qat_step1":        
+                    logger.info(f"{mixed_status}-{global_step}-SAVE : {eval_result*100}")
+                    model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
+                    quant_model = copy.deepcopy(model_to_save)
+                     
+                    output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
+                    output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
+
+                    torch.save(quant_model.state_dict(), output_model_file)
+                    model_to_save.config.to_json_file(output_config_file)
+                    tokenizer.save_vocabulary(output_quant_dir)
+                
                 # Save Model
                 save_model = False
 
@@ -1555,37 +1604,26 @@ def main():
                         torch.save(model_to_save.state_dict(), output_model_file)
                         model_to_save.config.to_json_file(output_config_file)
                         tokenizer.save_vocabulary(output_dir)
-                    if args.save_quantized_model:
-                        # logger.info("====> Save quantized model *****")
+                    # if args.save_quantized_model:
+                    #     # logger.info("====> Save quantized model *****")
 
-                        # output_quant_dir = os.path.join(output_dir, 'quant')
-                        output_quant_dir = os.path.join(output_dir, 'exploration')
-                        if not os.path.exists(output_quant_dir):
-                            os.mkdir(output_quant_dir)
+                    #     # output_quant_dir = os.path.join(output_dir, 'quant')
+                    #     output_quant_dir = os.path.join(output_dir, 'exploration')
+                    #     if not os.path.exists(output_quant_dir):
+                    #         os.mkdir(output_quant_dir)
 
-                        if not os.path.exists(output_quant_dir):
-                            os.makedirs(output_quant_dir)
+                    #     if not os.path.exists(output_quant_dir):
+                    #         os.makedirs(output_quant_dir)
                         
-                        output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
-                        if not os.path.exists(output_quant_dir):
-                            os.makedirs(output_quant_dir)
+                    #     output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
+                    #     if not os.path.exists(output_quant_dir):
+                    #         os.makedirs(output_quant_dir)
                         
-                        if args.training_type == "qat_step1":        
-                            model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
-                            quant_model = copy.deepcopy(model_to_save)
-                            # for name, module in quant_model.named_modules():
-                            #     if hasattr(module,'weight_quantizer'):
-                            #         module.qweight = module.weight_quantizer(module.weight, True)
-                                    
-                            output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
-                            output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
-
-                            torch.save(quant_model.state_dict(), output_model_file)
-                            model_to_save.config.to_json_file(output_config_file)
-                            tokenizer.save_vocabulary(output_quant_dir)
+        
                 
                 # SARQ Step-1
-                if args.training_type == "qat_step1":
+                if global_step >= num_train_optimization_steps and args.training_type == "qat_step1":
+                    
                     if global_step >= sarq_step_1_total_step:
                         logger.info(f"==> SARQ-step1 Previous Best = {previous_best}")
                         best_txt = os.path.join(output_quant_dir, "best_info.txt")
@@ -1604,8 +1642,12 @@ def main():
     # Save Best Score
     if args.save_quantized_model:
         best_txt = os.path.join(output_quant_dir, "best_info.txt")
+        last_txt = os.path.join(output_quant_dir, "last_info.txt")
         with open(best_txt, "w") as f_w:
             f_w.write(previous_best)
+        with open(last_txt, "w") as f_w:
+            f_w.write(f"{eval_result*100}")
+            # f_w.write(f"Last Result = {result}")
 
 if __name__ == "__main__":
     main()

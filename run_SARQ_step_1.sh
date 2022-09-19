@@ -50,20 +50,21 @@ gt_loss=1
 pred_distill=1
 rep_distill=1
 attn_distill=0
-attnmap_distill=$4
+attnmap_distill=1
 word_distill=0
 val_distill=0
-context_distill=$5
-output_distill=$6
+context_distill=0
+output_distill=1
 sa_output_distill=0
 
 # deprecated
 value_relation=0
 
 # Teacher Intervention (TI)
-teacher_attnmap=$7
-teacher_context=$8
-teacher_output=$9
+teacher_attnmap=0
+teacher_context=0
+teacher_output=0
+teacher_mixed=1
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
 training_type=qat_step1
@@ -109,7 +110,7 @@ CUDA_VISIBLE_DEVICES=$1 python quant_task_glue_non.py --data_dir data --task_nam
 --aug_N ${aug_N} \
 --prob_log ${prob_log} \
 --num_train_epochs 3 \
---teacher_attnmap ${teacher_attnmap} --teacher_context ${teacher_context} --teacher_output ${teacher_output} \
+--teacher_attnmap ${teacher_attnmap} --teacher_context ${teacher_context} --teacher_output ${teacher_output} --teacher_mixed ${teacher_mixed} \
 --other_lr ${other_lr} \
 --seed 1 --sm_temp ${sm_temp} --loss_SM ${loss_SM} \
 --step1_option ${step1_option} \

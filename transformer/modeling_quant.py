@@ -110,18 +110,18 @@ class BertSelfAttention(nn.Module):
             if self.config.quantize_weight:
                 self.weight_quant_flag = True
 
-            if self.config.teacher_attnmap:
-                self.query = nn.Linear(config.hidden_size, self.all_head_size)
-                self.key = nn.Linear(config.hidden_size, self.all_head_size)
-                self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
-            elif self.config.teacher_context or self.config.teacher_output:
-                self.query = nn.Linear(config.hidden_size, self.all_head_size)
-                self.key = nn.Linear(config.hidden_size, self.all_head_size)
-                self.value = nn.Linear(config.hidden_size, self.all_head_size)
-            else:
-                self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_query", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
-                self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_key", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
-                self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+            # if self.config.teacher_attnmap:
+            #     self.query = nn.Linear(config.hidden_size, self.all_head_size)
+            #     self.key = nn.Linear(config.hidden_size, self.all_head_size)
+            #     self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+            # elif self.config.teacher_context or self.config.teacher_output:
+            #     self.query = nn.Linear(config.hidden_size, self.all_head_size)
+            #     self.key = nn.Linear(config.hidden_size, self.all_head_size)
+            #     self.value = nn.Linear(config.hidden_size, self.all_head_size)
+            # else:
+            self.query = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_query", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+            self.key = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_key", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
+            self.value = QuantizeLinear(config.hidden_size, self.all_head_size,config=config, name=f"layer_{self.i}_{self.__class__.__name__}_value", weight_flag=self.weight_quant_flag, input_bit=config.input_bits)
 
         elif config.clipping:
             self.query = ClipLinear(config.hidden_size, self.all_head_size, config=config)
@@ -553,7 +553,7 @@ class BertPreTrainedModel(nn.Module):
         if state_dict is None:
             weights_path = os.path.join(
                 pretrained_model_name_or_path, WEIGHTS_NAME)
-            # logger.info("Loading model {}".format(weights_path))
+            logger.info("Loading model {}".format(weights_path))
             state_dict = torch.load(weights_path, map_location='cpu')
 
         # Load from a PyTorch state_dict
