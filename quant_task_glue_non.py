@@ -733,6 +733,14 @@ def main():
     parser.add_argument('--teacher_attnmap',
                         default =False, type=str2bool,
                         help="Teacher Intervention Option (Attention Map)")
+    
+    parser.add_argument('--teacher_stochastic',
+                        default =False, type=str2bool,
+                        help="Teacher Intervention Option (Stochastic Mixed)")
+    
+    parser.add_argument('--teacher_inverted',
+                        default =False, type=str2bool,
+                        help="Teacher Intervention Option (Stochastic Mixed)")
 
     parser.add_argument('--teacher_context',
                         default =False, type=str2bool,
@@ -810,6 +818,11 @@ def main():
             exp_name += f"_OI"
         if args.teacher_mixed:
             exp_name += f"_MIXED"
+        if args.teacher_inverted:
+            exp_name += f"_INVERTED"
+        if args.teacher_stochastic:
+            exp_name += f"_STOCHASTIC"
+    
     else:
         if args.attn_distill:
             exp_name += "_S"
@@ -822,8 +835,11 @@ def main():
         if args.sa_output_distill:
             exp_name += "_SA"
 
-        exp_name += f"_{args.seed}"            
+    exp_name += f"_{args.seed}"            
     
+
+    if args.training_type == "qat_step2":
+        exp_name += f"_{args.step1_option}"
     
     args.exp_name = exp_name
     
@@ -1008,7 +1024,7 @@ def main():
     num_train_optimization_steps = math.ceil(len(train_features) / args.batch_size) * num_train_epochs
     
     # SARQ Step-2 Iteration Number Setting
-    if "tiny-4l" in args.bert:
+    if "tiny-4l" in args.bert or task_name == "cola":
         sarq_step_1_total_step = 120
     else:
         sarq_step_1_total_step = 60
@@ -1273,6 +1289,39 @@ def main():
                     student_config.teacher_context = False
                     student_config.teacher_attnmap = True
                     mixed_status = "MI"
+            
+            if args.training_type == "qat_step1" and args.teacher_stochastic:
+                rand_int = torch.randint(1,4,(1,))[0].item()
+                
+                if rand_int == 1 :
+                    student_config.teacher_output = True
+                    student_config.teacher_context = False
+                    student_config.teacher_attnmap = False
+                    mixed_status = "OI"
+                elif rand_int == 2 :
+                    student_config.teacher_output = False
+                    student_config.teacher_context = True
+                    student_config.teacher_attnmap = False
+                    mixed_status = "CI"
+                else:
+                    student_config.teacher_output = False
+                    student_config.teacher_context = False
+                    student_config.teacher_attnmap = True
+                    mixed_status = "MI"
+
+            if args.training_type == "qat_step1" and args.teacher_inverted:
+                if global_step < num_train_optimization_steps / 6:
+                    student_config.teacher_attnmap = True
+                    mixed_status = "MI"
+                elif global_step < num_train_optimization_steps / 3:
+                    student_config.teacher_attnmap = False
+                    student_config.teacher_context = True
+                    mixed_status = "CI"
+                else:
+                    student_config.teacher_attnmap = False
+                    student_config.teacher_context = False
+                    student_config.teacher_output = True
+                    mixed_status = "OI"
 
             student_model.train()
             
@@ -1402,8 +1451,7 @@ def main():
                     # attmap_loss += attnmap_mse_loss
 
                     # Added for Coeff
-                    coeff = (1 - (i / student_config.num_hidden_layers)) + 0.2
-                    kld_loss_mean = kld_loss_mean * coeff
+                
                     attmap_loss += kld_loss_mean
                 
                 l_attmap_loss.update(attmap_loss.item())
