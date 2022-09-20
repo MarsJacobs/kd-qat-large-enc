@@ -834,8 +834,7 @@ def main():
             exp_name += "_O"
         if args.sa_output_distill:
             exp_name += "_SA"
-
-    exp_name += f"_{args.seed}"            
+        exp_name += f"_{args.seed}"            
     
 
     if args.training_type == "qat_step2":
@@ -990,7 +989,7 @@ def main():
     # ================================================================================  #
     # Load Vocab FIle -> Tokenization 
     # ================================================================================ #
-    tokenizer = BertTokenizer.from_pretrained(args.student_model, do_lower_case=True)
+    tokenizer = BertTokenizer.from_pretrained(args.teacher_model, do_lower_case=True)
     # save vocab file for logging
     tokenizer.save_vocabulary("./")
 
@@ -1033,7 +1032,7 @@ def main():
         args.eval_step = 10
         num_train_optimization_steps = sarq_step_1_total_step 
 
-    if args.training_type == "qat_step2": 
+    if args.training_type == "qat_step2" : 
         num_train_optimization_steps = num_train_optimization_steps - sarq_step_1_total_step
     
     train_data, _ = get_tensor_data(output_mode, train_features)
@@ -1310,10 +1309,10 @@ def main():
                     mixed_status = "MI"
 
             if args.training_type == "qat_step1" and args.teacher_inverted:
-                if global_step < num_train_optimization_steps / 6:
+                if global_step < num_train_optimization_steps / 3:
                     student_config.teacher_attnmap = True
                     mixed_status = "MI"
-                elif global_step < num_train_optimization_steps / 3:
+                elif global_step < num_train_optimization_steps * 2/ 3:
                     student_config.teacher_attnmap = False
                     student_config.teacher_context = True
                     mixed_status = "CI"

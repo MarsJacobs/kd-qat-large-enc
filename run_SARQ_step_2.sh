@@ -53,7 +53,7 @@ gt_loss=0
 pred_distill=1
 rep_distill=1
 
-attn_distill=0
+attn_distill=1
 attnmap_distill=$5
 context_distill=$6
 output_distill=$7
