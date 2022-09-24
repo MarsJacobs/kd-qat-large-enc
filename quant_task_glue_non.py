@@ -846,17 +846,19 @@ def main():
     # logger.info(f"DISTILL1 => rep : {args.rep_distill} | cls : {args.pred_distill} | atts : {args.attn_distill} | attmap : {args.attnmap_distill} | tc_insert : {args.teacher_attnmap} | gt_loss : {args.gt_loss}")
     # logger.info(f"DISTILL2 => S : {args.attn_distill} M : {args.attnmap_distill} C: {args.context_distill}  O: {args.output_distill}")
     # logger.info(f"COEFF => attnmap : {args.attnmap_coeff} | attnmap_word : {args.word_coeff} | cls_coeff : {args.cls_coeff} | att_coeff : {args.att_coeff} | rep_coeff : {args.rep_coeff}")
+    if args.aug_train:
+        logger.info(f'DA QAT')        
+        
     logger.info(f'EXP SET: {exp_name}')
+    logger.info(f'TASK: {args.task_name}')
+    logger.info(f"SIZE: {args.bert}")
     logger.info(f"SEED: {args.seed}")
-    logger.info(f'EXP SET: {exp_name}')
+    logger.info(f'EPOCH: {args.num_train_epochs}')
     # logger.info(f"QK-FP : {args.qk_FP}")
     # logger.info(f"STOP-GRAD : {args.stop_grad}")
     # logger.info(f"Others LR : {args.other_lr}")
 
     
-    if args.teacher_input:
-        logger.info("EXP SET : TEACHER INPUT")
-
     # logger.info('The args: {}'.format(args))
     
     # GLUE Dataset Setting
@@ -1019,7 +1021,7 @@ def main():
             with open(train_file, 'wb') as f:
                 pickle.dump(train_features, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    num_train_epochs = args.num_train_epochs if not args.aug_train else 1
+    num_train_epochs = args.num_train_epochs 
     num_train_optimization_steps = math.ceil(len(train_features) / args.batch_size) * num_train_epochs
     
     # SARQ Step-2 Iteration Number Setting
@@ -1273,7 +1275,8 @@ def main():
         # nb_tr_examples, nb_tr_steps = 0, 0
         # student_config.layer_thres_num += 6*epoch_
 
-        for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True, leave=False):
+        #for batch in tqdm(train_dataloader,desc=f"Epoch_{epoch_}", mininterval=0.01, ascii=True, leave=False):
+        for batch in train_dataloader:
             
             if args.training_type == "qat_step1" and args.teacher_mixed:
                 if global_step < num_train_optimization_steps / 6:
@@ -1483,21 +1486,21 @@ def main():
                     run["loss/attmap_loss_loss"].log(value=l_attmap_loss.avg, step=global_step)
                     
                     run["metrics/lr"].log(value=optimizer.get_lr()[0], step=global_step)
-                    if task_name=='cola':
-                        if run is not None:
-                            run["metrics/mcc"].log(value=result['mcc'], step=global_step)
-                    # logger.info(f"Eval Result is {result['mcc']}")
-                    elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
-                        if run is not None:
-                            run["metrics/acc"].log(value=result['acc'],step=global_step)
-                    # logger.info(f"Eval Result is {result['acc']}")
-                    elif task_name in ['mrpc','qqp']:
-                        if run is not None:
-                            run["metrics/acc_and_f1"].log(value=result['acc_and_f1'],step=global_step)
-                        # logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
-                    else:
-                        if run is not None:
-                            run["metrics/corr"].log(value=result['corr'],step=global_step)
+                    # if task_name=='cola':
+                    #     if run is not None:
+                    #         run["metrics/mcc"].log(value=result['mcc'], step=global_step)
+                    # # logger.info(f"Eval Result is {result['mcc']}")
+                    # elif task_name in ['sst-2','mnli','mnli-mm','qnli','rte','wnli']:
+                    #     if run is not None:
+                    #         run["metrics/acc"].log(value=result['acc'],step=global_step)
+                    # # logger.info(f"Eval Result is {result['acc']}")
+                    # elif task_name in ['mrpc','qqp']:
+                    #     if run is not None:
+                    #         run["metrics/acc_and_f1"].log(value=result['acc_and_f1'],step=global_step)
+                    #     # logger.info(f"Eval Result is {result['acc']}, {result['f1']}")
+                    # else:
+                    #     if run is not None:
+                    #         run["metrics/corr"].log(value=result['corr'],step=global_step)
  
             loss.backward()
             optimizer.step() 
@@ -1665,6 +1668,16 @@ def main():
                     #     output_quant_dir = os.path.join(output_quant_dir, args.exp_name)
                     #     if not os.path.exists(output_quant_dir):
                     #         os.makedirs(output_quant_dir)
+                        
+                    #     model_to_save = student_model.module if hasattr(student_model, 'module') else student_model
+                    #     quant_model = copy.deepcopy(model_to_save)
+                            
+                    #     output_model_file = os.path.join(output_quant_dir, WEIGHTS_NAME)
+                    #     output_config_file = os.path.join(output_quant_dir, CONFIG_NAME)
+
+                    #     torch.save(quant_model.state_dict(), output_model_file)
+                    #     model_to_save.config.to_json_file(output_config_file)
+                    #     tokenizer.save_vocabulary(output_quant_dir)
                         
         
                 

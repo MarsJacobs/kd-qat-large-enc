@@ -10,7 +10,7 @@
 
 for size in tiny-4l tiny-6l
 do
-    for task in rte sts-b mrpc
+    for task in cola
     do
         for epoch in 3 12
         do                                                  # Epoch-DA-N

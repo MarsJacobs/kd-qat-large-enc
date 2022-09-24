@@ -553,7 +553,7 @@ class BertPreTrainedModel(nn.Module):
         if state_dict is None:
             weights_path = os.path.join(
                 pretrained_model_name_or_path, WEIGHTS_NAME)
-            logger.info("Loading model {}".format(weights_path))
+            # logger.info("Loading model {}".format(weights_path))
             state_dict = torch.load(weights_path, map_location='cpu')
 
         # Load from a PyTorch state_dict

@@ -64,9 +64,9 @@ value_relation=0
 teacher_attnmap=0
 teacher_context=0
 teacher_output=0
-teacher_mixed=$4
-teacher_stochastic=$5
-teacher_inverted=$6
+teacher_mixed=1
+teacher_stochastic=0
+teacher_inverted=0
 
 # Training Type (downstream, qat_normal, qat_step1, qat_step2)
 training_type=qat_step1
