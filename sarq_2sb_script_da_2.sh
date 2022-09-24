@@ -9,15 +9,31 @@
 # bash run_SARQ_step_1.sh $1 $task $size 1 0 0
 
 
-for size in tiny-4l tiny-6l
+
+for size in tiny-4l
 do
     for task in cola
     do
-        for epoch in 1 12
+        for epoch in 10 30
         do                                                  # Epoch-DA-N
             for seed in 1 2 3
             do
-                bash run_SARQ_step_2.sh $1 $task $seed $size MIXED $epoch 1 30 # OI step2 - epoch
+                bash run_SARQ_step_2.sh $1 $task $seed $size MIXED $epoch 0 1 # OI step2 - epoch
+            done
+        done
+    done
+done
+
+
+for size in tiny-6l
+do
+    for task in cola
+    do
+        for epoch in 3 12
+        do                                                  # Epoch-DA-N
+            for seed in 1 2 3
+            do
+                bash run_SARQ_step_2.sh $1 $task $seed $size MIXED $epoch 0 1 # OI step2 - epoch
             done
         done
     done

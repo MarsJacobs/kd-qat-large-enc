@@ -9,6 +9,7 @@
 # bash run_SARQ_step_1.sh $1 $task $size 1 0 0
 
 
+
 for size in tiny-4l tiny-6l
 do
     for task in rte sts-b mrpc
