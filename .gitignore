@@ -1,0 +1,14 @@
+data
+tensor_files
+models
+output
+**/__pycache__/**
+.neptune
+.vscode
+*.pth
+*.png
+*.pt
+*.txt
+.ipynb_checkpoints 
+analysis_outputs
+fine-tuned
