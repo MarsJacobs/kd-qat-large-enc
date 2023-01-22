@@ -1,10 +1,14 @@
 # Understanding and Improving KD for QAT of Large Transformer Encoders
 
+<img width="2087" alt="스크린샷 2023-01-22 오후 7 37 29" src="https://user-images.githubusercontent.com/54992207/213911541-95e99d90-832e-4582-bb6f-a6e330a1048c.png">
+
 Code for [Understanding and Improving KD for QAT of Large Transformer Encoders (EMNLP 2022)](https://preview.aclanthology.org/emnlp-22-ingestion/2022.emnlp-main.450/)
 
 This paper provides in-depth analysis of the mechanism of Knowledge Distillation(KD) on Attention recovery of quantized large Transformers and based on this analysis, we propose new sets of KD loss functions for QAT.
 
 Our implementation is based on the Huawei-Noah TernaryBERT Pytorch code. ([link](https://github.com/huawei-noah/Pretrained-Language-Model/tree/master/TernaryBERT))
+
+
 
 ## Setup
 
