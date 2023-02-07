@@ -3,7 +3,7 @@
 <img width="2087" alt="스크린샷 2023-01-22 오후 7 37 29" src="https://user-images.githubusercontent.com/54992207/213911541-95e99d90-832e-4582-bb6f-a6e330a1048c.png">
 
 Code for "Understanding and Improving Knowledge Distailltion for Quantization-Aware-Training of Large Transformer Encoders"   
-[Proceeding link](https://aclanthology.org/2022.emnlp-main.450), [Arxiv Link](https://arxiv.org/abs/2211.11014)
+[Proceeding](https://aclanthology.org/2022.emnlp-main.450), [Arxiv](https://arxiv.org/abs/2211.11014)
 
 - This paper provides in-depth analysis of the mechanism of Knowledge Distillation(KD) on Attention recovery of quantized large Transformer encoders.
 - Based on this analysis, we propose new sets of KD loss functions for better QAT of ultra-low bit precision (Weight Ternarization of Transformer Encoders).
